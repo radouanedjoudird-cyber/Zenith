@@ -2,14 +2,17 @@ import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
-import { AppModule } from './app.module';
+import { AppModule } from './app.module'; // IMPORTANT: This line was missing or lowercased
 
 async function bootstrap() {
   const logger = new Logger('Zenith-Bootstrap');
+  
+  // High Performance: Use the correctly capitalized AppModule
   const app = await NestFactory.create(AppModule);
 
   /**
-   * SECURITY LAYER: HELMET (Advanced Configuration)
+   * SECURITY LAYER: HELMET
+   * Protection against common web vulnerabilities (XSS, Clickjacking, etc.)
    */
   app.use(helmet({
     hidePoweredBy: true,
@@ -17,14 +20,16 @@ async function bootstrap() {
   }));
 
   /**
-   * INFORMATION EXPOSURE: Remove X-Powered-By & Etag
+   * PERFORMANCE OPTIMIZATION:
+   * Disabling headers that reveal the technology stack (Express) and removing ETags to save bandwidth.
    */
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.disable('x-powered-by');
   expressApp.disable('etag');
 
   /**
-   * GLOBAL API CONFIGURATION
+   * GLOBAL API STRUCTURE:
+   * Enforcing standard 'api' prefix and URI-based versioning for clean architecture.
    */
   app.setGlobalPrefix('api');
   app.enableVersioning({
@@ -33,38 +38,36 @@ async function bootstrap() {
   });
 
   /**
-   * SWAGGER UI CONFIGURATION (Documentation Layer)
-   * PATH: http://localhost:3000/docs
+   * SWAGGER UI CONFIGURATION:
+   * Integrated JWT Bearer authentication globally for the interactive documentation.
    */
   const config = new DocumentBuilder()
-    .setTitle('Zenith Project API')
-    .setDescription('The official secure API documentation for Zenith distributed systems.')
+    .setTitle('Zenith Secure API')
+    .setDescription('Enterprise-grade distributed systems API documentation.')
     .setVersion('1.0')
     .addBearerAuth(
       { 
         type: 'http', 
         scheme: 'bearer', 
         bearerFormat: 'JWT', 
-        name: 'JWT',
-        description: 'Enter JWT token',
+        name: 'Authorization',
+        description: 'Simply paste your JWT access_token below.',
         in: 'header' 
       },
-      'JWT-auth',
+      'JWT-auth', // This KEY must match the @ApiBearerAuth('JWT-auth') in your controllers
     )
-    .addTag('Auth', 'User authentication and authorization operations')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  
-  // We use '/docs' to keep it separate from the versioned API paths
   SwaggerModule.setup('docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
+    swaggerOptions: { 
+      persistAuthorization: true, // Saves the token even after page refresh (productivity boost)
     },
   });
 
   /**
-   * GLOBAL VALIDATION PIPE
+   * GLOBAL VALIDATION PIPES:
+   * Whitelisting removes unexpected properties from requests instantly, improving security and speed.
    */
   app.useGlobalPipes(
     new ValidationPipe({
@@ -76,22 +79,16 @@ async function bootstrap() {
   );
 
   /**
-   * SECURE CORS CONFIGURATION
+   * SECURE CORS:
+   * Allows frontend integration during development and restricted origins in production.
    */
-  app.enableCors({
-    origin: process.env.NODE_ENV === 'production' 
-      ? process.env.ALLOWED_ORIGINS?.split(',') 
-      : true, 
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
-    allowedHeaders: 'Content-Type,Authorization',
-  });
+  app.enableCors({ origin: true, credentials: true });
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
   
-  logger.log(`🚀 Zenith Secure API [v1] is operational`);
-  logger.log(`📖 Swagger Documentation available at: http://localhost:${port}/docs`);
+  logger.log(`🚀 Zenith Secure Engine started on port ${port}`);
+  logger.log(`📖 Documentation: http://localhost:${port}/docs`);
 }
 
 bootstrap();

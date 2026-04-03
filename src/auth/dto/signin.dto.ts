@@ -1,44 +1,21 @@
 import { Transform } from 'class-transformer';
-import {
-  IsEmail,
-  IsNotEmpty,
-  IsString,
-  Matches,
-  MaxLength,
-  MinLength
-} from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
-/**
- * SECURE SIGNIN DTO
- * Handles strict validation and sanitization for Zenith Cloud.
- * SECURITY STRATEGY:
- * 1. Input Sanitization: Trim and Lowercase to prevent duplication/bypass.
- * 2. Payload Hardening: Strict length limits to prevent DoS.
- * 3. Pattern Matching: Ensure no malicious scripts are injected via fields.
- */
 export class SigninDto {
-  
-  @IsEmail({}, { message: 'Invalid credentials format' }) // Generic message
+  // SECURITY: Generic error message prevents "Email Enumeration" discovery
+  @IsEmail({}, { message: 'Invalid email or password format.' })
   @IsNotEmpty()
   @MaxLength(100)
-  /**
-   * SANITIZATION:
-   * Trims whitespace and converts to lowercase before validation.
-   * Prevents "Case Sensitivity" bypass attacks.
-   */
   @Transform(({ value }) => value?.trim().toLowerCase())
   email: string;
 
   @IsString()
   @IsNotEmpty()
-  @MinLength(8)
+  @MinLength(10)
   @MaxLength(32)
-  /**
-   * SECURITY PATTERN:
-   * Prevents common injection characters while allowing strong passwords.
-   */
-  @Matches(/^[a-zA-Z0-9!@#$%^&*()_+.\-]*$/, {
-    message: 'Password contains prohibited characters',
+  // SYMMETRY: Ensures allowed characters match the Signup policy to prevent lockouts
+  @Matches(/^[A-Za-z\d@$!%*?&_#^()]*$/, {
+    message: 'Invalid email or password format.',
   })
   password: string;
 }

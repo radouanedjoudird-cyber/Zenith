@@ -1,71 +1,44 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Logger,
-  Post,
-  Req,
-  UseGuards
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Logger, Post, Req, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { SigninDto, SignupDto } from './dto';
 import { AtGuard } from './guards/at.guard';
 
-/**
- * SECURE AUTH CONTROLLER
- * SECURITY STRATEGY:
- * 1. Strict Routing: Global prefix 'api' and versioning 'v1' are enforced in main.ts.
- * 2. Response Hardening: Avoid leaking server-side logic in JSON keys.
- * 3. Audit Logging: Trace authentication flow for security monitoring.
- */
+@ApiTags('Authentication') // Swagger grouping
+@ApiBearerAuth('JWT-auth') // LINK TO main.ts SECURITY DEFINITION
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
   constructor(private readonly authService: AuthService) {}
 
-  /**
-   * @Route   POST /auth/signup
-   * @Desc    Secure User Registration
-   * @Access  Public
-   */
   @Post('signup')
+  @ApiOperation({ summary: 'Register a new high-security user' })
   @HttpCode(HttpStatus.CREATED)
   async signup(@Body() signupDto: SignupDto) {
-    this.logger.log('Signup attempt received.');
-    // The DTO transformation already sanitized the input before reaching here.
+    this.logger.log(`Registering user: ${signupDto.email}`);
     return await this.authService.signup(signupDto);
   }
 
-  /**
-   * @Route   POST /auth/signin
-   * @Desc    Secure User Authentication
-   * @Access  Public
-   */
   @Post('signin')
+  @ApiOperation({ summary: 'Generate JWT access token' })
   @HttpCode(HttpStatus.OK)
   async signin(@Body() signinDto: SigninDto) {
-    this.logger.log(`Signin attempt for: ${signinDto.email}`);
+    this.logger.log(`Authentication request for: ${signinDto.email}`);
     return await this.authService.signin(signinDto);
   }
 
-  /**
-   * @Route   GET /auth/status
-   * @Desc    Check Session Integrity
-   * @Access  Private (Protected by AtGuard)
-   */
   @UseGuards(AtGuard)
   @Get('status')
+  @ApiBearerAuth('JWT-auth') // Explicitly show lock icon in Swagger for this route
+  @ApiOperation({ summary: 'Verify session and retrieve profile' })
   @HttpCode(HttpStatus.OK)
   async getStatus(@Req() req: Request) {
-    /**
-     * SECURITY: We only return essential user data.
-     * req.user was already sanitized in JwtStrategy.validate()
-     */
-this.logger.log(`Status check passed for User ID: ${req.user?.['id']}`);    
+    // req.user is populated by JwtStrategy.validate()
+    const userId = req.user?.['id'];
+    this.logger.log(`High-speed status check for User ID: ${userId}`);
+    
     return {
       status: 'authenticated',
       timestamp: new Date().toISOString(),

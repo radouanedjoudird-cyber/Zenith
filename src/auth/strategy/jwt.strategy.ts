@@ -1,65 +1,44 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 
-/**
- * SECURE JWT STRATEGY
- * SECURITY STRATEGY:
- * 1. Minimal Payload: Only fetch necessary fields to reduce memory exposure.
- * 2. Generic Exceptions: Hide the reason why a user was rejected.
- * 3. Secret Integrity: Ensure the secret is never hardcoded in production.
- */
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  private readonly logger = new Logger(JwtStrategy.name);
-
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+  ) {
     super({
+      // EXTRACTION: Standard Bearer Token extraction from Headers
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      // SECURITY: In production, this MUST come from ENV.
-secretOrKey: process.env.JWT_SECRET || 'DEVELOPMENT_SECRET_KEY',    });
+      secretOrKey: config.get<string>('JWT_SECRET')!,
+    });
   }
 
   /**
-   * VALIDATE METHOD
-   * SECURITY: We verify if the user exists and is active.
+   * PERFORMANCE VALIDATION: 
+   * Runs after the token is verified. We check if user still exists.
    */
   async validate(payload: { sub: number; email: string }) {
-    /**
-     * 1. LEAST PRIVILEGE PRINCIPLE:
-     * We only select the ID and Email. We do NOT fetch the password hash 
-     * from the DB here, even if we plan to delete it later. This is safer.
-     */
+    // OPTIMIZATION: Only select the fields we actually need. Never use 'select *'
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        familyName: true,
-        // Add "isActive: true" here if you implement account banning later
+      select: { 
+        id: true, 
+        email: true, 
+        firstName: true, 
+        familyName: true 
+        // We exclude 'password' for security and speed
       },
     });
 
-    // 2. USER EXISTENCE CHECK
     if (!user) {
-      this.logger.warn(`JWT Validation failed: User ID ${payload.sub} no longer exists.`);
-      
-      /**
-       * SECURITY: INFORMATION EXPOSURE
-       * We use a generic message. Telling the client "User not found" 
-       * helps an attacker know that a specific ID has been deleted.
-       */
-      throw new UnauthorizedException('Invalid authentication credentials.');
+      throw new UnauthorizedException('Security Alert: Token valid but user record not found.');
     }
 
-    /**
-     * 3. DATA INTEGRITY:
-     * Since we used 'select' in Prisma, 'user' already doesn't have a password.
-     * This is cleaner and more performant than using 'delete' or destructuring.
-     */
-    return user;
+    return user; // This object becomes 'req.user' in the controller
   }
 }
