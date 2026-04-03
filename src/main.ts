@@ -1,5 +1,6 @@
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
@@ -9,54 +10,75 @@ async function bootstrap() {
 
   /**
    * SECURITY LAYER: HELMET (Advanced Configuration)
-   * Helmet protects against common web vulnerabilities by setting HTTP headers.
    */
   app.use(helmet({
-    // Hide 'X-Powered-By' header to prevent attackers from knowing we use Express/Node.js
     hidePoweredBy: true,
-    // Ensure the site is only accessed via HTTPS
     hsts: process.env.NODE_ENV === 'production',
   }));
 
   /**
-   * INFORMATION EXPOSURE: Remove X-Powered-By
-   * Explicitly disabling this header at the Nest/Express level as a second layer of defense.
+   * INFORMATION EXPOSURE: Remove X-Powered-By & Etag
    */
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.disable('x-powered-by');
-  expressApp.disable('etag'); // Prevent caching-based fingerprinting
+  expressApp.disable('etag');
 
+  /**
+   * GLOBAL API CONFIGURATION
+   */
   app.setGlobalPrefix('api');
-
   app.enableVersioning({
     type: VersioningType.URI,
     defaultVersion: '1',
   });
 
   /**
-   * GLOBAL VALIDATION PIPE (Security Hardened)
-   * Prevents "Mass Assignment" and "Injection" attacks.
+   * SWAGGER UI CONFIGURATION (Documentation Layer)
+   * PATH: http://localhost:3000/docs
+   */
+  const config = new DocumentBuilder()
+    .setTitle('Zenith Project API')
+    .setDescription('The official secure API documentation for Zenith distributed systems.')
+    .setVersion('1.0')
+    .addBearerAuth(
+      { 
+        type: 'http', 
+        scheme: 'bearer', 
+        bearerFormat: 'JWT', 
+        name: 'JWT',
+        description: 'Enter JWT token',
+        in: 'header' 
+      },
+      'JWT-auth',
+    )
+    .addTag('Auth', 'User authentication and authorization operations')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  
+  // We use '/docs' to keep it separate from the versioned API paths
+  SwaggerModule.setup('docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
+
+  /**
+   * GLOBAL VALIDATION PIPE
    */
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,              
       forbidNonWhitelisted: true,   
       transform: true,              
-      /**
-       * INFO EXPOSURE PROTECTION: 
-       * Never show detailed validation errors in production. 
-       * Detailed errors can leak internal DTO structures to attackers.
-       */
       disableErrorMessages: process.env.NODE_ENV === 'production',
     }),
   );
 
   /**
    * SECURE CORS CONFIGURATION
-   * Limits which domains can talk to our API.
    */
   app.enableCors({
-    // In production, NEVER use '*', always specify your frontend domain.
     origin: process.env.NODE_ENV === 'production' 
       ? process.env.ALLOWED_ORIGINS?.split(',') 
       : true, 
@@ -68,7 +90,8 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port);
   
-  logger.log(`🚀 Zenith Secure API [v1] is operational on port: ${port}`);
+  logger.log(`🚀 Zenith Secure API [v1] is operational`);
+  logger.log(`📖 Swagger Documentation available at: http://localhost:${port}/docs`);
 }
 
 bootstrap();
