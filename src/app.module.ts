@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
-import { PrismaModule } from './prisma/prisma.module'; // تأكد أنه ينتهي بـ .module وليس .service
+import { PrismaModule } from './prisma/prisma.module';
 /**
  * SECURE ROOT APP MODULE
  * This is the central hub of Zenith Cloud.
