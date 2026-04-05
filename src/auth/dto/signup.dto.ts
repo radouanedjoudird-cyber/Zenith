@@ -21,6 +21,7 @@ export class SignupDto {
   familyName: string;
 
   @IsPhoneNumber('DZ') // Regional validation for Algeria
+  @IsNotEmpty()
   @Transform(({ value }) => value?.trim().replace(/\s/g, ''))
   phoneNumber: string;
 
