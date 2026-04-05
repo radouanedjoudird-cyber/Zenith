@@ -6,15 +6,18 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategy/jwt.strategy';
+import { RtStrategy } from './strategy/rt.strategy';
 
 /**
  * SECURE AUTHENTICATION MODULE
  * SECURITY STRATEGY:
  * 1. Explicit Dependency: PrismaModule is explicitly imported to ensure
  *    database access is always available, regardless of global scope changes.
- * 2. Async JWT Configuration: Secret is loaded via ConfigService at runtime,
+ * 2. Async JWT Configuration: Secret is loaded via ConfigService at startup,
  *    never hardcoded. This is the industry standard for secret management.
- * 3. Sessionless Auth: Passport is configured for stateless JWT to prevent
+ * 3. Dual Strategy: Two separate Passport strategies handle access tokens
+ *    and refresh tokens independently to prevent token type confusion attacks.
+ * 4. Sessionless Auth: Passport is configured for stateless JWT to prevent
  *    Session Hijacking attacks.
  */
 @Module({
@@ -45,14 +48,22 @@ import { JwtStrategy } from './strategy/jwt.strategy';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '1h' },
+        signOptions: { expiresIn: '15m' },
       }),
     }),
   ],
   controllers: [AuthController],
   providers: [
     AuthService,
-    JwtStrategy, // The internal judge responsible for token validation
+
+    /**
+     * DUAL STRATEGY PROVIDERS:
+     * JwtStrategy  → validates access tokens  (JWT_SECRET, 15 minutes)
+     * RtStrategy   → validates refresh tokens (JWT_REFRESH_SECRET, 7 days)
+     * Keeping them separate prevents token type confusion attacks.
+     */
+    JwtStrategy,
+    RtStrategy,
   ],
   exports: [
     // AuthService is kept private by default (Least Privilege Principle).

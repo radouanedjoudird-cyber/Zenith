@@ -1,12 +1,13 @@
 // ZENITH CLOUD - DATABASE SCHEMA v1.0
-// SECURITY STRATEGY: 
+// SECURITY STRATEGY:
 // 1. Isolation: Using @@map to decouple DB table names from application logic.
 // 2. Integrity: Strict unique constraints on sensitive identifiers.
 // 3. Performance: Strategic indexing for fast lookup and DoS mitigation.
+// 4. Token Security: Refresh tokens are stored as bcrypt hashes, never raw.
 
 generator client {
-  provider      = "prisma-client-js"
-  // Added "linux-musl-openssl-3.0.x" if you plan to use Docker later
+  provider = "prisma-client-js"
+  // Binary targets cover local development, Debian production, and Docker (Alpine) environments.
   binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
@@ -17,27 +18,50 @@ datasource db {
 
 model User {
   id          Int      @id @default(autoincrement())
-  
-  // SECURITY: Normalization and unique constraint prevents account duplication
+
+  /**
+   * SECURITY: Unique constraint prevents account duplication.
+   * Normalized to lowercase in the DTO layer before reaching the database.
+   */
   email       String   @unique
-  
-  // SECURITY: Hashed password storage (Bcrypt 12)
+
+  /**
+   * SECURITY: Raw passwords are never stored.
+   * Only bcrypt hashes with 12 salt rounds are persisted here.
+   */
   password    String
-  
+
   firstName   String
   familyName  String
-  
-  // SECURITY: Phone numbers should be unique to prevent "Sybil Attacks" (fake multiple accounts)
+
+  /**
+   * SECURITY: Unique phone number prevents Sybil Attacks
+   * (creating multiple fake accounts to abuse the system).
+   */
   phoneNumber String   @unique
 
-  // AUDIT TRAIL: Essential for forensics in case of a security breach
+  /**
+   * REFRESH TOKEN SECURITY:
+   * The raw refresh token is NEVER stored in the database.
+   * Only a bcrypt hash of the token is persisted here.
+   * This means even if the database is fully compromised,
+   * an attacker cannot use the stolen hashes to forge sessions.
+   * Nullable: set to null when the user signs out (token revocation).
+   */
+  hashedRt    String?
+
+  /**
+   * AUDIT TRAIL:
+   * Timestamps are essential for forensic analysis in case of a security breach.
+   * updatedAt tracks the last token rotation, providing a session activity log.
+   */
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   /**
-   * DATABASE MAPPING
-   * Decoupling the model name in NestJS (User) from the table name (users).
-   * This is a standard practice to hide internal code naming from DB admins.
+   * DATABASE MAPPING:
+   * Decouples the Prisma model name (User) from the actual DB table name (users).
+   * This is a standard practice to hide internal naming conventions from DB admins.
    */
   @@map("users")
 }
