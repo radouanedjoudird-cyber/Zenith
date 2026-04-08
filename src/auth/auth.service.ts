@@ -36,6 +36,8 @@ export class AuthService {
    * @logic Implements 'The Defensive Default' - Users cannot escalate their own 
    * privileges via public endpoints. Requests for ADMIN/MODERATOR are forcefully 
    * downgraded to USER unless created via an authorized administrative channel.
+   * * @audit_update Includes the 'id' in the response to ensure the AuditInterceptor 
+   * captures the exact entity identifier for the forensic trail.
    */
   async signup(dto: SignupDto) {
     try {
@@ -66,7 +68,15 @@ export class AuthService {
 
       const tokens = await this.signTokens(newUser.id, newUser.email, newUser.role);
       await this.updateHashedRt(newUser.id, tokens.refresh_token);
-      return tokens;
+
+      /**
+       * @return Full authentication payload including the user ID to facilitate 
+       * deep auditing and entity resolution by the monitoring middleware.
+       */
+      return {
+        ...tokens,
+        id: newUser.id,
+      };
     } catch (error) {
       if (error.code === 'P2002') {
         this.logger.error(`[AUTH] Conflict: Identity ${dto.email} already exists.`);
@@ -99,7 +109,12 @@ export class AuthService {
 
     const tokens = await this.signTokens(user.id, user.email, user.role);
     await this.updateHashedRt(user.id, tokens.refresh_token);
-    return tokens;
+
+    // Provide User ID in response for frontend context and backend auditing
+    return {
+      ...tokens,
+      id: user.id,
+    };
   }
 
   /**
@@ -133,7 +148,11 @@ export class AuthService {
 
     const tokens = await this.signTokens(user.id, user.email, user.role);
     await this.updateHashedRt(user.id, tokens.refresh_token);
-    return tokens;
+    
+    return {
+      ...tokens,
+      id: user.id,
+    };
   }
 
   /**
