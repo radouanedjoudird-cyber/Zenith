@@ -1,11 +1,9 @@
-// ZENITH CLOUD - DATABASE SCHEMA v1.1
-// VERSION CONTROL: RBAC Implementation Phase
+// ZENITH CLOUD ARCHITECTURE - DATABASE PERSISTENCE LAYER v1.2
 // -----------------------------------------------------------------------------
-// SECURITY STRATEGY:
-// 1. ISOLATION: Decoupling DB entities from application logic via @@map.
-// 2. DATA INTEGRITY: Strict Enum-based Role Management (RBAC).
-// 3. AUDITABILITY: Automated timestamping for forensic session analysis.
-// 4. PERFORMANCE: Optimized Binary Targets for multi-environment deployment.
+// INFRASTRUCTURE DESIGN:
+// 1. RBAC: Strict privilege hierarchy via PostgreSQL Enums.
+// 2. FORENSICS: AuditLog system for administrative event tracking.
+// 3. SECURITY: PII (Personally Identifiable Information) unique indexing.
 
 generator client {
   provider = "prisma-client-js"
@@ -18,8 +16,8 @@ datasource db {
 }
 
 /**
- * RBAC ENUMERATION:
- * Defines the strict privilege hierarchy within the system.
+ * PRIVILEGE HIERARCHY (RBAC)
+ * Defines the core access levels for system authorization.
  */
 enum Role {
   USER
@@ -27,44 +25,52 @@ enum Role {
   MODERATOR
 }
 
+/**
+ * CORE IDENTITY MODEL
+ * -------------------
+ * Stores primary user metadata and session verification hashes.
+ */
 model User {
   id           Int      @id @default(autoincrement())
-
-  /**
-   * IDENTITY MANAGEMENT:
-   * Unique constraint indexed for high-performance authentication lookups.
-   */
   email        String   @unique
-
-  /**
-   * CREDENTIAL SECURITY:
-   * Stores high-entropy Bcrypt hashes. Raw passwords never touch the persistence layer.
-   */
   password     String
-
   firstName    String
   familyName   String
-
-  /**
-   * ANTI-SYBIL PROTECTION:
-   * Unique phone constraint to prevent mass-automated account creation.
-   */
   phoneNumber  String   @unique
-
-  /**
-   * RBAC STRATEGY:
-   * Enforces the Principle of Least Privilege (PoLP) by defaulting to 'USER'.
-   */
+  
+  // POLICY: Default to USER to enforce 'Principle of Least Privilege'
   role         Role     @default(USER)
-
-  /**
-   * TOKEN ROTATION & REVOCATION:
-   * Stores hashed refresh tokens to secure sessions even during DB compromise.
-   */
+  
+  // SESSION SECURITY: Stores Bcrypt hash of the Refresh Token
   hashedRt     String?
-
+  
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@map("users")
+}
+
+/**
+ * AUDIT LOGGING SYSTEM (FORENSICS)
+ * --------------------------------
+ * Captures critical system state changes and security-sensitive actions.
+ * Used for compliance and troubleshooting in production environments.
+ */
+model AuditLog {
+  id             Int      @id @default(autoincrement())
+  action         String   // e.g., "SIGNUP", "PRIVILEGE_ESCALATION", "INFRA_DELETE"
+  entity         String?  // Target module
+  entityId       String?  // ID of the affected resource
+  userId         Int?     // Actor ID
+  userEmail      String?  
+  ipAddress      String?  // Originating IP
+  userAgent      String?  // Client/Browser signature
+  metadata       Json?    // Detailed payload comparison
+  status         String   @default("SUCCESS") // Outcome: [SUCCESS, FAILURE, DENIED]
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

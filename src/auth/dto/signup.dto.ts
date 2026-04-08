@@ -1,26 +1,38 @@
 import { Transform } from 'class-transformer';
 import {
-  IsEmail, IsNotEmpty,
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
   IsPhoneNumber,
   IsString, Matches, MaxLength, MinLength
 } from 'class-validator';
+import { Role } from '../../common/enums/role.enum';
 
+/**
+ * DATA TRANSFER OBJECT: SIGNUP PROTOCOL
+ * ------------------------------------
+ * SECURITY MEASURES:
+ * 1. Sanitization: Strips malicious HTML tags (XSS Prevention).
+ * 2. Normalization: Standardizes email and name casings for DB consistency.
+ * 3. Validation: Enforces regional phone formats and complex password entropy.
+ */
 export class SignupDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  // XSS PROTECTION: Strips HTML tags to prevent script injection in name fields
+  // XSS PROTECTION: Prevents script injection in user-facing fields
   @Transform(({ value }) => value?.trim().replace(/<[^>]*>?/gm, ''))
   firstName: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  // NORMALIZATION: Ensures family name is trimmed and lowercase for DB consistency
+  // DATA CONSISTENCY: Enforces lowercase storage for predictable querying
   @Transform(({ value }) => value?.trim().toLowerCase().replace(/<[^>]*>?/gm, ''))
   familyName: string;
 
-  @IsPhoneNumber('DZ') // Regional validation for Algeria
+  @IsPhoneNumber('DZ') // Regional constraint for Algerian telecommunications
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim().replace(/\s/g, ''))
   phoneNumber: string;
@@ -36,14 +48,20 @@ export class SignupDto {
   @MinLength(10)
   @MaxLength(32)
   /**
-   * IRONCLAD PASSWORD POLICY (Regex):
-   * 1. Requires at least one lowercase letter (?=.*[a-z])
-   * 2. Requires at least one uppercase letter (?=.*[A-Z])
-   * 3. Requires at least one numeric digit (?=.*\d)
-   * 4. Requires one special symbol from allowed set (?=.*[@$!%*?&_#^()])
+   * CRYPTOGRAPHIC PASSWORD POLICY (Regex):
+   * Ensures high-entropy strings containing:
+   * [Uppercase, Lowercase, Digit, Special Character]
    */
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_#^()])[A-Za-z\d@$!%*?&_#^()]{10,32}$/, {
     message: 'Security Policy: Password must include Uppercase, Lowercase, Number, and Special Symbol.',
   })
   password: string;
+
+  /**
+   * OPTIONAL ROLE CLAIM:
+   * Clients may request a role, but it is subject to 'Privilege Filter' in AuthService.
+   */
+  @IsEnum(Role)
+  @IsOptional()
+  role?: Role = Role.USER;
 }

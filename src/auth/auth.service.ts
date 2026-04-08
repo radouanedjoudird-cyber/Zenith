@@ -7,17 +7,18 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { Role } from '../common/enums/role.enum';
 import { PrismaService } from '../prisma/prisma.service';
 import { SigninDto, SignupDto } from './dto';
 
 /**
- * ZENITH AUTHENTICATION SERVICE - CORE CRYPTO ENGINE
- * --------------------------------------------------
- * SECURITY ARCHITECTURE:
- * 1. RBAC Synchronization: Roles are fetched during signing to ensure token authority.
- * 2. Timing Attack Resilience: Dummy hashing for non-existent users.
- * 3. Token Rotation (RT): Implements hash-based refresh token verification.
- * 4. Salt Hardening: Standardized 12 rounds for PII, 10 for ephemeral RTs.
+ * ZENITH AUTHENTICATION & IDENTITY SERVICE
+ * -----------------------------------------
+ * CORE RESPONSIBILITIES:
+ * - Secure Identity Provisioning (Signup)
+ * - Anti-Escalation Role Filtering (RBAC Safety)
+ * - Multi-Factor Session Issuance (JWT AT/RT)
+ * - Timing Attack Mitigation (Signin)
  */
 @Injectable()
 export class AuthService {
@@ -30,12 +31,25 @@ export class AuthService {
   ) {}
 
   /**
-   * IDENTITY ESTABLISHMENT (SIGNUP)
-   * @description Creates a secure user record and initiates the first authenticated session.
+   * IDENTITY PROVISIONING (SIGNUP)
+   * ------------------------------
+   * @logic Implements 'The Defensive Default' - Users cannot escalate their own 
+   * privileges via public endpoints. Requests for ADMIN/MODERATOR are forcefully 
+   * downgraded to USER unless created via an authorized administrative channel.
    */
   async signup(dto: SignupDto) {
     try {
       const hashedPassword = await bcrypt.hash(dto.password, 12);
+
+      // SECURITY SHIELD: Detects and mitigates Privilege Escalation attempts
+      let finalRole: Role = Role.USER;
+      
+      if (dto.role && dto.role !== Role.USER) {
+        this.logger.warn(
+          `[SECURITY ALERT] Privilege Escalation Attempt: ${dto.email} requested ${dto.role}. Logic forced to USER.`
+        );
+        finalRole = Role.USER; 
+      }
 
       const newUser = await this.prisma.user.create({
         data: {
@@ -44,42 +58,44 @@ export class AuthService {
           firstName: dto.firstName,
           familyName: dto.familyName,
           phoneNumber: dto.phoneNumber,
+          role: finalRole,
         },
       });
 
-      this.logger.log(`[AUTH] Identity verified and established for: ${newUser.email}`);
+      this.logger.log(`[AUTH] Identity Secured: ${newUser.email} | Assigned Role: ${newUser.role}`);
 
       const tokens = await this.signTokens(newUser.id, newUser.email, newUser.role);
       await this.updateHashedRt(newUser.id, tokens.refresh_token);
       return tokens;
     } catch (error) {
       if (error.code === 'P2002') {
-        this.logger.warn(`[AUTH] Registration conflict on existing credential.`);
+        this.logger.error(`[AUTH] Conflict: Identity ${dto.email} already exists.`);
         throw new ForbiddenException('Registration could not be completed.');
       }
-      throw new ForbiddenException('System temporarily unavailable.');
+      throw new ForbiddenException('Identity Engine Timeout.');
     }
   }
 
   /**
-   * SESSION INITIATION (SIGNIN)
-   * @description Validates credentials with timing-attack mitigation and issues token pairs.
+   * SESSION AUTHENTICATION (SIGNIN)
+   * -------------------------------
+   * @logic Utilizes constant-time comparison (mitigating timing attacks) and
+   * fetches fresh role claims from the DB to prevent stale session privileges.
    */
   async signin(dto: SigninDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
 
+    // SECURITY: Comparison against dummy hash if user not found to prevent user enumeration
     const dummyHash = '$2b$12$L8v4Y0U6U7S8T9V0W1X2Y3Z4A5B6C7D8E9F0G1H2I3J4K5L6M7N8O';
     const passwordToCompare = user ? user.password : dummyHash;
     const isPasswordValid = await bcrypt.compare(dto.password, passwordToCompare);
 
     if (!user || !isPasswordValid) {
-      this.logger.warn(`[AUTH] Unauthorized access attempt detected.`);
-      throw new UnauthorizedException('Invalid email or password.');
+      this.logger.warn(`[AUTH] Unauthorized Access Attempt on account: ${dto.email}`);
+      throw new UnauthorizedException('Invalid credentials.');
     }
 
-    this.logger.log(`[AUTH] Access granted for User ID: ${user.id}`);
+    this.logger.log(`[AUTH] Session Initialized for Identity: ${user.id}`);
 
     const tokens = await this.signTokens(user.id, user.email, user.role);
     await this.updateHashedRt(user.id, tokens.refresh_token);
@@ -88,6 +104,7 @@ export class AuthService {
 
   /**
    * SESSION TERMINATION (SIGNOUT)
+   * -----------------------------
    * @description Nullifies the refresh token hash to prevent hijacked session reuse.
    */
   async signout(userId: number) {
@@ -101,6 +118,7 @@ export class AuthService {
 
   /**
    * TOKEN REFRESH PROTOCOL
+   * ----------------------
    * @description Rotates the access token after verifying the refresh token's hash integrity.
    */
   async refreshTokens(userId: number, rawRt: string) {
@@ -120,17 +138,17 @@ export class AuthService {
 
   /**
    * JWT COMPOSITION ENGINE
-   * @private
+   * @private Generates cryptographically signed Access & Refresh tokens.
    */
   private async signTokens(userId: number, email: string, role: string) {
-    const jwtPayload = { sub: userId, email, role };
+    const payload = { sub: userId, email, role };
 
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwt.signAsync(jwtPayload, {
+      this.jwt.signAsync(payload, {
         secret: this.config.get<string>('JWT_SECRET'),
         expiresIn: '15m',
       }),
-      this.jwt.signAsync(jwtPayload, {
+      this.jwt.signAsync(payload, {
         secret: this.config.get<string>('JWT_REFRESH_SECRET'),
         expiresIn: '7d',
       }),
@@ -139,6 +157,10 @@ export class AuthService {
     return { access_token: accessToken, refresh_token: refreshToken };
   }
 
+  /**
+   * REFRESH TOKEN HASH PERSISTENCE
+   * @private Updates the hashed RT in database for rotation security.
+   */
   private async updateHashedRt(userId: number, rawRt: string) {
     const hashedRt = await bcrypt.hash(rawRt, 10);
     await this.prisma.user.update({ where: { id: userId }, data: { hashedRt } });
