@@ -5,60 +5,53 @@ import { Request } from 'express';
 import { ExtractJwt, Strategy, StrategyOptionsWithRequest } from 'passport-jwt';
 
 /**
- * REFRESH TOKEN STRATEGY:
- * A dedicated Passport strategy for validating refresh tokens.
- * Completely separate from the access token strategy (jwt.strategy.ts)
- * to prevent token type confusion attacks.
- *
- * KEY DIFFERENCE from JwtStrategy:
- * This strategy extracts the RAW refresh token from the Authorization header
- * and attaches it to req.user. This allows AuthService.refreshTokens()
- * to compare it against the stored bcrypt hash in the database.
+ * ZENITH REFRESH TOKEN STRATEGY (JWT-RT)
+ * -------------------------------------
+ * SECURITY STRATEGY: Token Rotation & Database Hash Comparison.
+ * This strategy extracts the RAW refresh token to allow the AuthService
+ * to verify it against the hashed version stored in the database.
  */
 @Injectable()
 export class RtStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
   constructor(config: ConfigService) {
-    /**
-     * EXPLICIT TYPE CASTING:
-     * We explicitly type the options as StrategyOptionsWithRequest
-     * to satisfy TypeScript's strict type checking while keeping
-     * passReqToCallback: true for raw token extraction.
-     */
     const options: StrategyOptionsWithRequest = {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('JWT_REFRESH_SECRET')!,
-      passReqToCallback: true,
+      passReqToCallback: true, // Crucial for raw token extraction
     };
     super(options);
   }
 
   /**
-   * REFRESH TOKEN VALIDATION:
-   * Called automatically by Passport after the JWT signature is verified.
-   * We extract the raw token and attach it to the payload so AuthService
-   * can validate it against the bcrypt hash stored in the database.
+   * REFRESH VALIDATION:
+   * Called after JWT signature is verified. Extracts the raw token from headers.
+   * * @param req - The raw Express request object.
+   * @param payload - The decoded JWT payload { sub, email }.
+   * @returns Integrated user object with raw token.
    */
   async validate(req: Request, payload: { sub: number; email: string }) {
-    const rawRt = req.get('Authorization')?.replace('Bearer', '').trim();
+    const authHeader = req.get('Authorization');
+    const rawRt = authHeader?.replace('Bearer', '').trim();
 
     /**
-     * SECURITY CHECK:
-     * If for any reason the raw token cannot be extracted,
-     * we immediately reject the request.
+     * SECURITY GUARD: 
+     * Immediate rejection if the raw token is missing or malformed.
      */
     if (!rawRt) {
-      throw new ForbiddenException('Access Denied. Refresh token not found.');
+      throw new ForbiddenException('Access Denied: Refresh token extraction failed.');
     }
 
     /**
-     * PAYLOAD ENRICHMENT:
-     * We attach the raw token to the returned object.
-     * This becomes req.user in the controller, giving AuthService
-     * direct access to both the userId and the raw token for hash comparison.
+     * UNIFIED PAYLOAD:
+     * We return a composite object that satisfies all decorators:
+     * 1. sub: For @GetCurrentUserId()
+     * 2. id: For legacy Prisma queries.
+     * 3. refreshToken: For AuthService comparison.
      */
     return {
       ...payload,
+      id: payload.sub, // Mapping for internal consistency
       refreshToken: rawRt,
     };
   }

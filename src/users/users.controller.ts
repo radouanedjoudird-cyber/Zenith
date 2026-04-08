@@ -12,76 +12,78 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AtGuard } from '../auth/guards/at.guard';
-import { GetCurrentUserId } from '../common/decorators';
+import { GetCurrentUserId, Roles } from '../common/decorators';
+import { Role } from '../common/enums/role.enum';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { UpdateUserDto } from './dto';
 import { UsersService } from './users.service';
 
 /**
- * ZENITH USERS CONTROLLER - SECURE GATEWAY
- * ----------------------------------------
- * Manages HTTP orchestration for profile lifecycle and administration.
- * SECURITY: Standardized on JWT Access Tokens via AtGuard.
+ * ZENITH USERS CONTROLLER - ENTERPRISE EDITION
+ * -------------------------------------------
+ * Orchestrates user-related operations with high-security standards.
+ * IMPLEMENTS: RBAC (Role-Based Access Control) & JWT Authentication.
  */
 @ApiTags('Users Management')
-@ApiBearerAuth('JWT-auth') // Applied globally to the controller for cleaner Swagger UI
-@UseGuards(AtGuard)        // Applied globally: All user routes require a token
-@Controller('users')
+@ApiBearerAuth('JWT-auth')
+@UseGuards(AtGuard, RolesGuard) // Dual-layer protection: Auth + Authorization
+@Controller({ path: 'users', version: '1' })
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // SELF-SERVICE ENDPOINTS (Authenticated Users)
-  // ──────────────────────────────────────────────────────────────────────────
+  // ===========================================================================
+  // SELF-SERVICE MODULE (Standard User Privileges)
+  // ===========================================================================
 
   @Get('me')
-  @ApiOperation({ summary: 'Retrieve current authenticated user profile' })
-  @ApiResponse({ status: 200, description: 'Profile retrieved successfully.' })
-  @ApiResponse({ status: 404, description: 'User not found.' })
+  @ApiOperation({ summary: 'Retrieve personal profile of the authenticated user' })
+  @ApiResponse({ status: 200, description: 'User data returned securely.' })
   getMe(@GetCurrentUserId() userId: number) {
     return this.usersService.getMe(userId);
   }
 
   @Put('me')
-  @ApiOperation({ summary: 'Update current authenticated user profile' })
+  @ApiOperation({ summary: 'Update personal profile information' })
   @ApiResponse({ status: 200, description: 'Profile updated successfully.' })
-  @ApiResponse({ status: 409, description: 'Conflict: Email or Phone already exists.' })
-  updateMe(
-    @GetCurrentUserId() userId: number, 
-    @Body() dto: UpdateUserDto
-  ) {
+  @ApiResponse({ status: 409, description: 'Conflict: Identity attributes already in use.' })
+  updateMe(@GetCurrentUserId() userId: number, @Body() dto: UpdateUserDto) {
     return this.usersService.updateMe(userId, dto);
   }
 
   @Delete('me')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Permanently delete current user account' })
-  @ApiResponse({ status: 200, description: 'Account deleted.' })
+  @ApiOperation({ summary: 'Self-initiated account termination' })
+  @ApiResponse({ status: 200, description: 'Account purged from production.' })
   deleteMe(@GetCurrentUserId() userId: number) {
     return this.usersService.deleteMe(userId);
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // ADMINISTRATIVE ENDPOINTS (RBAC Placeholder)
-  // ──────────────────────────────────────────────────────────────────────────
+  // ===========================================================================
+  // ADMINISTRATIVE MODULE (Elevated Privileges Only)
+  // ===========================================================================
 
   /**
-   * ADMIN ONLY: Get all users.
-   * NOTE: In the next step, we will add @Roles(Role.ADMIN) here.
+   * SECURITY: ADMIN_ONLY
+   * Provides global visibility for system oversight.
    */
+  @Roles(Role.ADMIN)
   @Get()
-  @ApiOperation({ summary: 'List all users [ADMIN ONLY]' })
-  @ApiResponse({ status: 403, description: 'Forbidden: Insufficient privileges.' })
+  @ApiOperation({ summary: 'Fetch all registered users [ADMIN ONLY]' })
+  @ApiResponse({ status: 200, description: 'Full user directory retrieved.' })
+  @ApiResponse({ status: 403, description: 'Forbidden: Admin role required.' })
   getAllUsers() {
-    // Audit Note: This call currently requires only a valid token. 
-    // RBAC Guard will be attached here to lock it to Admins.
     return this.usersService.getAllUsers();
   }
 
   /**
-   * ADMIN/MODERATOR ONLY: Get specific user.
+   * SECURITY: ADMIN_MODERATOR
+   * Targeted lookup for administrative or support purposes.
    */
+  @Roles(Role.ADMIN, Role.MODERATOR)
   @Get(':id')
-  @ApiOperation({ summary: 'Find specific user by ID [ADMIN ONLY]' })
+  @ApiOperation({ summary: 'Retrieve specific user by ID [ELEVATED ONLY]' })
+  @ApiResponse({ status: 200, description: 'Target user found.' })
+  @ApiResponse({ status: 404, description: 'Target user not located.' })
   getUserById(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.getUserById(id);
   }

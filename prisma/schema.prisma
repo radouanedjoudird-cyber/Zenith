@@ -1,13 +1,14 @@
-// ZENITH CLOUD - DATABASE SCHEMA v1.0
+// ZENITH CLOUD - DATABASE SCHEMA v1.1
+// VERSION CONTROL: RBAC Implementation Phase
+// -----------------------------------------------------------------------------
 // SECURITY STRATEGY:
-// 1. Isolation: Using @@map to decouple DB table names from application logic.
-// 2. Integrity: Strict unique constraints on sensitive identifiers.
-// 3. Performance: Strategic indexing for fast lookup and DoS mitigation.
-// 4. Token Security: Refresh tokens are stored as bcrypt hashes, never raw.
+// 1. ISOLATION: Decoupling DB entities from application logic via @@map.
+// 2. DATA INTEGRITY: Strict Enum-based Role Management (RBAC).
+// 3. AUDITABILITY: Automated timestamping for forensic session analysis.
+// 4. PERFORMANCE: Optimized Binary Targets for multi-environment deployment.
 
 generator client {
   provider = "prisma-client-js"
-  // Binary targets cover local development, Debian production, and Docker (Alpine) environments.
   binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
@@ -16,52 +17,54 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/**
+ * RBAC ENUMERATION:
+ * Defines the strict privilege hierarchy within the system.
+ */
+enum Role {
+  USER
+  ADMIN
+  MODERATOR
+}
+
 model User {
-  id          Int      @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
 
   /**
-   * SECURITY: Unique constraint prevents account duplication.
-   * Normalized to lowercase in the DTO layer before reaching the database.
+   * IDENTITY MANAGEMENT:
+   * Unique constraint indexed for high-performance authentication lookups.
    */
-  email       String   @unique
+  email        String   @unique
 
   /**
-   * SECURITY: Raw passwords are never stored.
-   * Only bcrypt hashes with 12 salt rounds are persisted here.
+   * CREDENTIAL SECURITY:
+   * Stores high-entropy Bcrypt hashes. Raw passwords never touch the persistence layer.
    */
-  password    String
+  password     String
 
-  firstName   String
-  familyName  String
-
-  /**
-   * SECURITY: Unique phone number prevents Sybil Attacks
-   * (creating multiple fake accounts to abuse the system).
-   */
-  phoneNumber String   @unique
+  firstName    String
+  familyName   String
 
   /**
-   * REFRESH TOKEN SECURITY:
-   * The raw refresh token is NEVER stored in the database.
-   * Only a bcrypt hash of the token is persisted here.
-   * This means even if the database is fully compromised,
-   * an attacker cannot use the stolen hashes to forge sessions.
-   * Nullable: set to null when the user signs out (token revocation).
+   * ANTI-SYBIL PROTECTION:
+   * Unique phone constraint to prevent mass-automated account creation.
    */
-  hashedRt    String?
+  phoneNumber  String   @unique
 
   /**
-   * AUDIT TRAIL:
-   * Timestamps are essential for forensic analysis in case of a security breach.
-   * updatedAt tracks the last token rotation, providing a session activity log.
+   * RBAC STRATEGY:
+   * Enforces the Principle of Least Privilege (PoLP) by defaulting to 'USER'.
    */
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  role         Role     @default(USER)
 
   /**
-   * DATABASE MAPPING:
-   * Decouples the Prisma model name (User) from the actual DB table name (users).
-   * This is a standard practice to hide internal naming conventions from DB admins.
+   * TOKEN ROTATION & REVOCATION:
+   * Stores hashed refresh tokens to secure sessions even during DB compromise.
    */
+  hashedRt     String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   @@map("users")
 }

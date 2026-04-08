@@ -5,12 +5,11 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
- * ZENITH SECURE ENGINE - ACCESS TOKEN STRATEGY (JWT-AT)
- * ----------------------------------------------------
+ * ZENITH IDENTITY STRATEGY (JWT-AT-VALIDATOR)
+ * ------------------------------------------
  * @description
- * This strategy is the core of our authentication system. It validates 
- * the integrity of the Access Token and performs a "Deep Identity Check"
- * against the database to ensure the user still exists and is authorized.
+ * Reconstructs the 'request.user' object from the Bearer Token.
+ * It enforces strict database synchronization for Role-Based Access Control.
  */
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -19,68 +18,43 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     private readonly config: ConfigService,
   ) {
     /**
-     * CONFIGURATION HARDENING:
-     * We extract the secret first to perform a strict null-check.
-     * This prevents the server from running in an insecure/broken state.
+     * SECURITY HARDENING:
+     * We ensure the secret is defined or fallback to a critical error.
      */
     const secret = config.get<string>('JWT_SECRET');
-    
-    if (!secret) {
-      // Logic: If the secret is missing, the system is fundamentally insecure.
-      throw new Error('CRITICAL CONFIGURATION ERROR: JWT_SECRET is missing in .env');
-    }
+    if (!secret) throw new Error('CRITICAL: JWT_SECRET environment variable is not set.');
 
     super({
-      // EXTRACTION: Standard Bearer Token extraction from Headers
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      
-      // SECURITY: Strictly reject expired tokens to prevent Replay Attacks.
-      ignoreExpiration: false, 
-      
-      // TYPE SAFETY: The secret is now guaranteed to be a string.
+      ignoreExpiration: false,
       secretOrKey: secret,
     });
   }
 
   /**
-   * SESSION & INTEGRITY VALIDATION:
-   * This method executes after the JWT signature is cryptographically verified.
-   * * @param payload - The decoded token object { sub, email, iat, exp }
-   * @returns Integrated user object for 'request.user'
+   * AUTHENTICATION CALLBACK:
+   * Decodes the payload and injects fresh user data into the request pipeline.
+   * @param payload - Decoded JWT claims { sub, email, role }
    */
-  async validate(payload: { sub: number; email: string }) {
+  async validate(payload: { sub: number; email: string; role: string }) {
     /**
-     * DEEP VALIDATION (Database Check):
-     * Even if the token is valid, we must verify the user hasn't been 
-     * deleted or suspended since the token was issued.
+     * REAL-TIME ROLE SYNC:
+     * We fetch the current role from the DB to prevent 'Stale Role' privilege escalation.
      */
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: { 
         id: true, 
         email: true,
-        // Performance: Select minimal fields to reduce DB load.
+        role: true, // MANDATORY: Required for RolesGuard comparison
       },
     });
 
-    /**
-     * ACCOUNT CHECK:
-     * If the user is no longer in the database, we immediately revoke access.
-     */
     if (!user) {
-      throw new UnauthorizedException('Security Breach: User account not found or revoked.');
+      throw new UnauthorizedException('Security Breach: Identity context not found.');
     }
 
-    /**
-     * COMPATIBILITY & DECORATOR SUPPORT:
-     * We return a composite object that satisfies all project requirements:
-     * 1. sub: Required by @GetCurrentUserId() decorator.
-     * 2. id: Required for direct user.id access in services.
-     * 3. email: Required for audit logging and communications.
-     */
-    return {
-      ...payload, // Contains decoded 'sub' and 'email'
-      ...user,    // Ensures 'id' is present for Prisma queries
-    };
+    // Attached to Request.user
+    return user; 
   }
 }
