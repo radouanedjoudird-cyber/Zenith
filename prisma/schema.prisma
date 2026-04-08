@@ -1,12 +1,13 @@
-// ZENITH CLOUD ARCHITECTURE - DATABASE PERSISTENCE LAYER v1.2
+// ZENITH CLOUD ARCHITECTURE - DATABASE PERSISTENCE LAYER v1.3
 // -----------------------------------------------------------------------------
-// INFRASTRUCTURE DESIGN:
-// 1. RBAC: Strict privilege hierarchy via PostgreSQL Enums.
-// 2. FORENSICS: AuditLog system for administrative event tracking.
-// 3. SECURITY: PII (Personally Identifiable Information) unique indexing.
+// IMPROVEMENTS:
+// 1. SYNC: Renamed 'metadata' to 'details' to match Guard implementation.
+// 2. MONITORING: Added 'severity' for high-priority security alerts.
+// 3. PERFORMANCE: Optimized indexes for forensics querying.
 
 generator client {
   provider = "prisma-client-js"
+  // Keep binaryTargets for your HP ProBook (Linux) and potential Docker deployments
   binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
@@ -15,21 +16,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/**
- * PRIVILEGE HIERARCHY (RBAC)
- * Defines the core access levels for system authorization.
- */
 enum Role {
   USER
   ADMIN
   MODERATOR
 }
 
-/**
- * CORE IDENTITY MODEL
- * -------------------
- * Stores primary user metadata and session verification hashes.
- */
 model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique
@@ -37,40 +29,36 @@ model User {
   firstName    String
   familyName   String
   phoneNumber  String   @unique
-  
-  // POLICY: Default to USER to enforce 'Principle of Least Privilege'
   role         Role     @default(USER)
-  
-  // SESSION SECURITY: Stores Bcrypt hash of the Refresh Token
   hashedRt     String?
-  
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@map("users")
 }
 
-/**
- * AUDIT LOGGING SYSTEM (FORENSICS)
- * --------------------------------
- * Captures critical system state changes and security-sensitive actions.
- * Used for compliance and troubleshooting in production environments.
- */
 model AuditLog {
-  id             Int      @id @default(autoincrement())
-  action         String   // e.g., "SIGNUP", "PRIVILEGE_ESCALATION", "INFRA_DELETE"
-  entity         String?  // Target module
-  entityId       String?  // ID of the affected resource
-  userId         Int?     // Actor ID
-  userEmail      String?  
-  ipAddress      String?  // Originating IP
-  userAgent      String?  // Client/Browser signature
-  metadata       Json?    // Detailed payload comparison
-  status         String   @default("SUCCESS") // Outcome: [SUCCESS, FAILURE, DENIED]
-  createdAt      DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  action       String   // e.g., "UNAUTHORIZED_ACCESS_ATTEMPT", "SIGNUP"
+  entity       String?  
+  entityId     String?  
+  userId       Int?     
+  userEmail    String?  
+  ipAddress    String?  
+  userAgent    String?  
+  
+  // FIXED: Renamed from metadata to details to resolve TypeScript errors in Guards
+  details      Json?    
+  
+  // NEW: Categorize logs for fast response (INFO, WARN, CRITICAL)
+  severity     String   @default("INFO") 
+  
+  status       String   @default("SUCCESS") 
+  createdAt    DateTime @default(now())
 
   @@index([userId])
   @@index([action])
+  @@index([severity]) // New index for security monitoring
   @@index([createdAt])
   @@map("audit_logs")
 }

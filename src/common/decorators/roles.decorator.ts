@@ -1,11 +1,16 @@
 import { SetMetadata } from '@nestjs/common';
-import { Role } from '../enums/role.enum';
+import { Role } from '@prisma/client'; // Direct reference to Prisma Enum
 
 /**
- * ZENITH ACCESS CONTROL DECORATOR
- * ------------------------------
- * This decorator allows specifying which roles are permitted to access a route.
- * It uses 'SetMetadata' to attach the required roles to the request handler.
+ * @constant ROLES_KEY
+ * @description Unique identifier for role metadata storage.
  */
 export const ROLES_KEY = 'roles';
+
+/**
+ * @decorator Roles
+ * @description 
+ * Grants access based on user roles. Works seamlessly with Prisma-defined roles.
+ * Usage: @Roles(Role.ADMIN)
+ */
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);

@@ -1,3 +1,4 @@
+import { Role } from '@prisma/client'; // HIGH PERFORMANCE: Direct DB Type Sync
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
@@ -5,42 +6,57 @@ import {
   IsNotEmpty,
   IsOptional,
   IsPhoneNumber,
-  IsString, Matches, MaxLength, MinLength
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength
 } from 'class-validator';
-import { Role } from '../../common/enums/role.enum';
 
 /**
  * DATA TRANSFER OBJECT: SIGNUP PROTOCOL
  * ------------------------------------
  * SECURITY MEASURES:
- * 1. Sanitization: Strips malicious HTML tags (XSS Prevention).
+ * 1. Sanitization: Strips malicious HTML tags (XSS Prevention) using high-speed Regex.
  * 2. Normalization: Standardizes email and name casings for DB consistency.
- * 3. Validation: Enforces regional phone formats and complex password entropy.
+ * 3. Validation: Enforces regional phone formats (DZ) and complex password entropy.
+ * 4. DB Integrity: Strictly typed using Prisma Client Roles.
  */
 export class SignupDto {
+  
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  // XSS PROTECTION: Prevents script injection in user-facing fields
-  @Transform(({ value }) => value?.trim().replace(/<[^>]*>?/gm, ''))
+  /**
+   * XSS PROTECTION & WHITESPACE CLEANUP:
+   * Standardizes the user input for Infrastructure-grade stability.
+   */
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/<[^>]*>?/gm, '') : value)
   firstName: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  // DATA CONSISTENCY: Enforces lowercase storage for predictable querying
-  @Transform(({ value }) => value?.trim().toLowerCase().replace(/<[^>]*>?/gm, ''))
+  /**
+   * DATA CONSISTENCY & NORMALIZATION:
+   * Enforces lowercase storage for predictable querying and indexing performance.
+   */
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase().replace(/<[^>]*>?/gm, '') : value)
   familyName: string;
 
-  @IsPhoneNumber('DZ') // Regional constraint for Algerian telecommunications
+  /**
+   * REGIONAL VALIDATION (ALGERIA - DZ):
+   * Ensures the phone number complies with local telecommunication standards.
+   * Strips all internal whitespaces for optimized DB storage.
+   */
+  @IsPhoneNumber('DZ') 
   @IsNotEmpty()
-  @Transform(({ value }) => value?.trim().replace(/\s/g, ''))
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/\s/g, '') : value)
   phoneNumber: string;
 
-  @IsEmail()
+  @IsEmail({}, { message: 'Security Alert: Invalid email structure detected.' })
   @IsNotEmpty()
   @MaxLength(100)
-  @Transform(({ value }) => value?.trim().toLowerCase())
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   email: string;
 
   @IsString()
@@ -48,18 +64,18 @@ export class SignupDto {
   @MinLength(10)
   @MaxLength(32)
   /**
-   * CRYPTOGRAPHIC PASSWORD POLICY (Regex):
-   * Ensures high-entropy strings containing:
-   * [Uppercase, Lowercase, Digit, Special Character]
+   * CRYPTOGRAPHIC PASSWORD POLICY (MIL-SPEC ENTROPY):
+   * Enforces a minimum length of 10 and requires:
+   * [1 Uppercase, 1 Lowercase, 1 Digit, 1 Special Character (@$!%*?&_#^())]
    */
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_#^()])[A-Za-z\d@$!%*?&_#^()]{10,32}$/, {
-    message: 'Security Policy: Password must include Uppercase, Lowercase, Number, and Special Symbol.',
+    message: 'Security Policy Failure: Password must contain Uppercase, Lowercase, Number, and Special Character.',
   })
   password: string;
 
   /**
-   * OPTIONAL ROLE CLAIM:
-   * Clients may request a role, but it is subject to 'Privilege Filter' in AuthService.
+   * AUTHORIZATION CLAIM:
+   * Defaults to USER. Elevation to ADMIN requires distinct privilege verification in AuthService.
    */
   @IsEnum(Role)
   @IsOptional()

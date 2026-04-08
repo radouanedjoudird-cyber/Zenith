@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_INTERCEPTOR } from '@nestjs/core'; // Added for Global Interceptor binding
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor'; // Forensic engine import
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
@@ -14,6 +16,7 @@ import { UsersModule } from './users/users.module';
  * 1. Global Configuration: Load environment variables safely via ConfigModule.
  * 2. Module Ordering: Prisma and Auth are prioritized to establish the security perimeter.
  * 3. Domain Logic: UsersModule is integrated to handle profile and account management.
+ * 4. Forensic Auditing: Global Interceptor ensures every state-change is logged.
  */
 @Module({
   imports: [
@@ -54,6 +57,16 @@ import { UsersModule } from './users/users.module';
      * Handles top-level core business logic and system health checks.
      */
     AppService,
+
+    /**
+     * GLOBAL AUDIT INTERCEPTOR:
+     * Implements a cross-cutting concern for forensic logging.
+     * Captures (Who, What, When, Where) for all POST, PUT, DELETE operations.
+     */
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
+    },
   ],
 })
 export class AppModule {}

@@ -10,59 +10,64 @@ import {
 } from 'class-validator';
 
 /**
- * UPDATE USER DATA TRANSFER OBJECT (DTO)
- * --------------------------------------
- * This class defines the schema for partial user updates.
- * All fields are optional (@IsOptional) to support PATCH requests.
+ * ZENITH UPDATE USER DTO - SECURE PATCH PROTOCOL
+ * ---------------------------------------------
+ * STRATEGY: 
+ * 1. Partial Updates: All fields are @IsOptional to support efficient PATCH operations.
+ * 2. Hardened Sanitization: Integrated Type-Guards in @Transform to prevent runtime crashes.
+ * 3. Scope Limitation: Noticeably excludes 'Role' to prevent Horizontal Privilege Escalation.
  */
 export class UpdateUserDto {
-  /**
-   * SECURITY: Sanitizes input to prevent XSS (Cross-Site Scripting).
-   * Removes any HTML tags and trims whitespace.
-   */
+
   @IsOptional()
   @IsString()
   @MaxLength(50)
-  @Transform(({ value }) => value?.trim().replace(/<[^>]*>?/gm, ''))
+  /**
+   * XSS DEFENSE LAYER:
+   * Strips HTML and trims whitespace. 
+   * Type-check ensures compatibility with non-string payloads.
+   */
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/<[^>]*>?/gm, '') : value)
   firstName?: string;
 
-  /**
-   * NORMALIZATION: Converts family name to lowercase for database consistency.
-   */
   @IsOptional()
   @IsString()
   @MaxLength(50)
-  @Transform(({ value }) => value?.trim().toLowerCase().replace(/<[^>]*>?/gm, ''))
+  /**
+   * DATA NORMALIZATION:
+   * Enforces lowercase storage for consistent lookups and indexing.
+   */
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase().replace(/<[^>]*>?/gm, '') : value)
   familyName?: string;
 
-  /**
-   * VALIDATION: Ensures the phone number follows Algerian ('DZ') standards.
-   * Trims whitespace to prevent format mismatch.
-   */
   @IsOptional()
   @IsPhoneNumber('DZ')
-  @Transform(({ value }) => value?.trim().replace(/\s/g, ''))
+  /**
+   * INFRASTRUCTURE CONSISTENCY:
+   * Strips internal spaces to match the storage format used in Zenith Registry.
+   */
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/\s/g, '') : value)
   phoneNumber?: string;
 
   /**
-   * DATA INTEGRITY: Forces email to lowercase to prevent duplicate accounts 
-   * caused by case sensitivity (e.g., User@Email.com vs user@email.com).
+   * CRITICAL SECURITY NOTE: 
+   * Updating email via this DTO should be paired with an 'Email Verification' flow 
+   * in the UserService to prevent account takeover.
    */
   @IsOptional()
-  @IsEmail()
+  @IsEmail({}, { message: 'Security Alert: Invalid email format submitted.' })
   @MaxLength(100)
-  @Transform(({ value }) => value?.trim().toLowerCase())
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   email?: string;
 
-  /**
-   * SECURITY POLICY: Enforces a high-entropy password.
-   * Must include: Uppercase, Lowercase, Number, and Special Character.
-   * Length: 10 to 32 characters.
-   */
   @IsOptional()
   @IsString()
   @MinLength(10)
   @MaxLength(32)
+  /**
+   * MIL-SPEC PASSWORD COMPLEXITY:
+   * Enforced even on partial updates to ensure no weak passwords enter the system.
+   */
   @Matches(
     /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_#^()])[A-Za-z\d@$!%*?&_#^()]{10,32}$/,
     {
