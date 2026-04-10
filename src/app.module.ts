@@ -1,67 +1,96 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_INTERCEPTOR } from '@nestjs/core'; // Added for Global Interceptor binding
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
-import { AuditInterceptor } from './common/interceptors/audit.interceptor'; // Forensic engine import
+import { AtGuard } from './auth/guards/at.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
 /**
- * SECURE ROOT APP MODULE
- * ----------------------
- * This is the central hub of Zenith Cloud.
- * * SECURITY STRATEGY:
- * 1. Global Configuration: Load environment variables safely via ConfigModule.
- * 2. Module Ordering: Prisma and Auth are prioritized to establish the security perimeter.
- * 3. Domain Logic: UsersModule is integrated to handle profile and account management.
- * 4. Forensic Auditing: Global Interceptor ensures every state-change is logged.
+ * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v2.8
+ * --------------------------------------------------
+ * This module serves as the central nervous system of the Zenith platform.
+ * * STRATEGY FOR HIGH-AVAILABILITY & SECURITY:
+ * 1. ZERO-TRUST ARCHITECTURE: All routes are guarded by default via Global AtGuard.
+ * 2. MULTI-LAYERED DEFENSE: Integrated Throttling, Authentication, and PBAC.
+ * 3. PERFORMANCE TUNING: Config caching enabled for ultra-low latency on HP-ProBook.
+ * 4. FORENSIC CONTINUITY: Asynchronous telemetry capture for all system state changes.
+ * * @author Radouane Djoudi
+ * @environment HP-ProBook / Linux-Production
  */
 @Module({
   imports: [
     /**
-     * CONFIG MODULE:
-     * Loads .env variables globally. Essential for protecting 
-     * JWT secrets and DB credentials from being hardcoded.
+     * CONFIGURATION KERNEL:
+     * High-speed environment variable management with memory caching.
      */
     ConfigModule.forRoot({
-      isGlobal: true, 
+      isGlobal: true,
+      cache: true,
     }),
 
     /**
-     * PRISMA MODULE:
-     * The foundation of data integrity. Must be loaded early 
-     * to establish secure DB connections for all other modules.
+     * RATE LIMITING ENGINE (ANTI-DOS/BRUTE-FORCE):
+     * Protects the infrastructure layer from resource exhaustion and automated attacks.
+     */
+    ThrottlerModule.forRoot([{
+      name: 'standard',
+      ttl: 60000, 
+      limit: 100, 
+    }, {
+      name: 'critical',
+      ttl: 60000,
+      limit: 5,   // Strict limit for sensitive Auth/Write operations.
+    }]),
+
+    /**
+     * CORE INFRASTRUCTURE:
+     * PrismaModule handles connection pooling to Neon DB with optimized RTT.
      */
     PrismaModule,
 
     /**
-     * AUTH MODULE:
-     * Contains the Guards and Strategies (JWT AT/RT) that act as the 
-     * security perimeter for the entire Zenith Cloud API.
+     * DOMAIN LOGIC MODULES:
+     * Encapsulates the core business logic of the Zenith platform.
      */
     AuthModule,
-
-    /**
-     * USERS MODULE:
-     * Handles all user-related business logic, including profile updates,
-     * account deletion, and administrative user management.
-     */
     UsersModule,
   ],
-  controllers: [AppController],
   providers: [
     /**
-     * APP SERVICE:
-     * Handles top-level core business logic and system health checks.
+     * GLOBAL GUARD 1: RATE LIMITER
+     * Priority: High. First line of defense against network-level abuse.
      */
-    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
 
     /**
-     * GLOBAL AUDIT INTERCEPTOR:
-     * Implements a cross-cutting concern for forensic logging.
-     * Captures (Who, What, When, Where) for all POST, PUT, DELETE operations.
+     * GLOBAL GUARD 2: ACCESS TOKEN VALIDATION (AT)
+     * Priority: Critical. Enforces "Secure by Default" strategy across all endpoints.
+     * Note: Public routes must be explicitly marked with @Public() decorator.
+     */
+    {
+      provide: APP_GUARD,
+      useClass: AtGuard,
+    },
+
+    /**
+     * GLOBAL GUARD 3: PERMISSION-BASED ACCESS CONTROL (PBAC)
+     * Priority: Essential. Validates granular permissions for authenticated users.
+     */
+    {
+      provide: APP_GUARD,
+      useClass: PermissionsGuard,
+    },
+
+    /**
+     * GLOBAL INTERCEPTOR: FORENSIC TELEMETRY
+     * Post-Execution capture for auditing and security compliance.
      */
     {
       provide: APP_INTERCEPTOR,

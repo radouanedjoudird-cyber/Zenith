@@ -1,37 +1,50 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 /**
- * DATA TRANSFER OBJECT: SIGNIN PROTOCOL
- * ------------------------------------
- * SECURITY MEASURES:
- * 1. Anti-Enumeration: Standardized error messages to mask user existence.
- * 2. Payload Normalization: Forced lowercase and trimming for predictable DB lookups.
- * 3. Character Symmetry: Strict alignment with Signup entropy policies.
+ * DATA TRANSFER OBJECT: SIGNIN PROTOCOL (SHIELDED)
+ * -----------------------------------------------
+ * ARCHITECTURE: Enterprise Secure Access Gateway
+ * * SECURITY MEASURES:
+ * 1. ANTI-ENUMERATION: Generic error messaging to mitigate account harvesting.
+ * 2. PAYLOAD NORMALIZATION: Canonical email formatting to ensure DB index hits.
+ * 3. INJECTION PREVENTION: Whitelist regex enforcement on password stream.
+ * * @author Radouane Djoudi
+ * @project Zenith Secure Engine
  */
 export class SigninDto {
 
+  @ApiProperty({ 
+    example: 'admin@zenith-systems.dz', 
+    description: 'Registered email address. Case-insensitive.' 
+  })
   /**
-   * SECURITY: Generic error message prevents 'Email Enumeration' discovery.
-   * PERFORMANCE: Forced lowercasing to match DB indexes (email_unique).
+   * CREDENTIAL NORMALIZATION:
+   * Forces lowercase to ensure consistency with the DB unique index.
+   * Generic error message prevents 'Account Discovery' attacks.
    */
-  @IsEmail({}, { message: 'Invalid email or password format.' })
+  @IsEmail({}, { message: 'Authentication failed: Invalid credentials.' })
   @IsNotEmpty()
   @MaxLength(100)
   @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   email: string;
 
+  @ApiProperty({ 
+    example: 'Znt@2026!Sec', 
+    description: 'Cryptographic password string.' 
+  })
   /**
-   * CRYPTOGRAPHIC CONSISTENCY:
-   * Ensures the characters sent match the allowed set defined in SignupDto.
-   * This prevents 'WAF Bypass' attempts or injection of forbidden control characters.
+   * SYMMETRIC VALIDATION:
+   * Aligned with Signup entropy but utilizes a generic message.
+   * Whitelisting allowed characters to block complex injection payloads.
    */
   @IsString()
   @IsNotEmpty()
   @MinLength(10)
   @MaxLength(32)
   @Matches(/^[A-Za-z\d@$!%*?&_#^()]*$/, {
-    message: 'Invalid email or password format.',
+    message: 'Authentication failed: Invalid credentials.',
   })
   password: string;
 }

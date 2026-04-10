@@ -7,99 +7,128 @@ import {
   HttpStatus,
   Param,
   ParseIntPipe,
-  Patch, // ADDED: More appropriate for partial updates in Enterprise APIs
+  Patch,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client'; // High-Level Type Safety
 import { AtGuard } from '../auth/guards/at.guard';
 import { GetCurrentUserId } from '../common/decorators/get-current-user-id.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
-import { RolesGuard } from '../common/guards/roles.guard'; // FIXED: Pointing to the new centralized location
+import { Permissions } from '../common/decorators/permissions.decorator';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { AuditInterceptor } from '../common/interceptors/audit.interceptor';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 /**
- * ZENITH USERS CONTROLLER - ENTERPRISE EDITION
- * -------------------------------------------
- * Orchestrates user-related operations with high-security standards.
- * IMPLEMENTS: RBAC (Role-Based Access Control), JWT Auth & Forensic Auditing.
- * INFRASTRUCTURE: Optimized for HP-ProBook deployment environment.
+ * ZENITH USERS CONTROLLER - ENTERPRISE IDENTITY MANAGEMENT v2.8
+ * -------------------------------------------------------------
+ * ARCHITECTURE: Orchestrates the secure lifecycle of user-centric identity operations.
+ * * SECURITY GOVERNANCE:
+ * 1. PBAC (Permission-Based Access Control): Enforces "Principle of Least Privilege" at the routing layer.
+ * 2. IDENTITY SYMMETRY: Seamlessly integrated with AtGuard for stateless identity resolution.
+ * 3. FORENSIC TELEMETRY: Leverages AuditInterceptor to persist every state-changing transaction.
+ * 4. PERFORMANCE: Stateless execution logic tailored for high-speed RTT on local infrastructure.
+ * * @author Radouane Djoudi
+ * @project Zenith Secure Engine
  */
-@ApiTags('Users Management')
+@ApiTags('Identity & Access Management')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AtGuard, RolesGuard) // Dual-layer protection: Auth + Authorization
-@UseInterceptors(AuditInterceptor) // Forensic Logging Layer
+@UseGuards(AtGuard, PermissionsGuard) // Multi-layered Shield: Auth + Granular Permissions
+@UseInterceptors(AuditInterceptor)     // Automated Telemetry for every sensitive request
 @Controller({ path: 'users', version: '1' })
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   // ===========================================================================
-  // SELF-SERVICE MODULE (Standard User Privileges)
+  // MODULE: SELF-SERVICE (Standard Identity Operations)
   // ===========================================================================
 
-  @Get('me')
-  @ApiOperation({ summary: 'Retrieve personal profile of the authenticated user' })
-  @ApiResponse({ status: 200, description: 'User data returned securely.' })
   /**
-   * DATA PRIVACY: Ensures users can only access their own data via JWT payload identification.
+   * SELF-PROFILE RETRIEVAL
+   * Logic: Returns the authenticated user's own data registry.
+   * Permission: 'PROFILE_READ'
    */
+  @Permissions('PROFILE_READ')
+  @Get('me')
+  @ApiOperation({ 
+    summary: 'Retrieve personal profile',
+    description: 'Provides secure read-access to the authenticated subject\'s own metadata.' 
+  })
+  @ApiResponse({ status: 200, description: 'Identity context retrieved successfully.' })
   getMe(@GetCurrentUserId() userId: number) {
+    /**
+     * DATA INTEGRITY: The userId is extracted directly from the decrypted JWT payload 
+     * using @GetCurrentUserId() to prevent ID-spoofing attacks.
+     */
     return this.usersService.getMe(userId);
   }
 
-  @Patch('me') // CHANGED: Standardized to PATCH for DTO-based partial updates
-  @ApiOperation({ summary: 'Update personal profile information' })
-  @ApiResponse({ status: 200, description: 'Profile updated successfully.' })
-  @ApiResponse({ status: 409, description: 'Conflict: Identity attributes already in use.' })
   /**
-   * INTEGRITY CHECK: Prevents mass-assignment via Whitelisted DTO.
+   * SELF-PROFILE MODIFICATION
+   * Logic: Performs partial updates on non-sensitive profile attributes.
+   * Permission: 'PROFILE_UPDATE'
    */
+  @Permissions('PROFILE_UPDATE')
+  @Patch('me')
+  @ApiOperation({ 
+    summary: 'Update profile attributes',
+    description: 'Enables partial modification of identity metadata with mass-assignment protection.' 
+  })
+  @ApiResponse({ status: 200, description: 'Profile attributes updated and audited.' })
   updateMe(@GetCurrentUserId() userId: number, @Body() dto: UpdateUserDto) {
     return this.usersService.updateMe(userId, dto);
   }
 
+  /**
+   * SELF-INITIATED ACCOUNT TERMINATION
+   * Logic: Removes the user from the primary identity registry.
+   * Permission: 'PROFILE_DELETE'
+   */
+  @Permissions('PROFILE_DELETE')
   @Delete('me')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Self-initiated account termination' })
-  @ApiResponse({ status: 200, description: 'Account purged from production.' })
-  /**
-   * DESTRUCTIVE ACTION: Automatically triggers AuditLog via Interceptor.
-   */
+  @ApiOperation({ 
+    summary: 'Self-initiated account termination',
+    description: 'Permanently purges the user identity. This operation is recorded in high-severity logs.' 
+  })
+  @ApiResponse({ status: 200, description: 'Identity purged from system registry.' })
   deleteMe(@GetCurrentUserId() userId: number) {
     return this.usersService.deleteMe(userId);
   }
 
   // ===========================================================================
-  // ADMINISTRATIVE MODULE (Elevated Privileges Only)
+  // MODULE: ADMINISTRATIVE GOVERNANCE (Elevated Privileges)
   // ===========================================================================
 
   /**
-   * SECURITY: ADMIN_ONLY
-   * Provides global visibility for system oversight.
-   * ACCESS_LEVEL: High (Strictly Audit-Logged)
+   * GLOBAL REGISTRY DISCOVERY
+   * Logic: Exposes the full user directory for administrative oversight.
+   * Permission: 'USER_VIEW_ALL'
    */
-  @Roles(Role.ADMIN)
+  @Permissions('USER_VIEW_ALL')
   @Get()
-  @ApiOperation({ summary: 'Fetch all registered users [ADMIN ONLY]' })
-  @ApiResponse({ status: 200, description: 'Full user directory retrieved.' })
-  @ApiResponse({ status: 403, description: 'Forbidden: Admin role required.' })
+  @ApiOperation({ 
+    summary: 'Fetch all identities [ADMIN ONLY]',
+    description: 'Administrative lookup for full system directory oversight.' 
+  })
+  @ApiResponse({ status: 200, description: 'Global user registry retrieved.' })
   getAllUsers() {
     return this.usersService.getAllUsers();
   }
 
   /**
-   * SECURITY: ADMIN_MODERATOR
-   * Targeted lookup for administrative or support purposes.
-   * ACCESS_LEVEL: Elevated
+   * TARGETED IDENTITY LOOKUP
+   * Logic: Performs a surgical lookup of a specific identity via Unique Identifier.
+   * Permission: 'USER_VIEW_SINGLE'
    */
-  @Roles(Role.ADMIN, Role.MODERATOR)
+  @Permissions('USER_VIEW_SINGLE')
   @Get(':id')
-  @ApiOperation({ summary: 'Retrieve specific user by ID [ELEVATED ONLY]' })
-  @ApiResponse({ status: 200, description: 'Target user found.' })
-  @ApiResponse({ status: 404, description: 'Target user not located.' })
+  @ApiOperation({ 
+    summary: 'Targeted identity lookup [ELEVATED ONLY]',
+    description: 'Executes a surgical ID lookup. Input is sanitized via ParseIntPipe.' 
+  })
+  @ApiResponse({ status: 200, description: 'Target identity context returned.' })
   getUserById(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.getUserById(id);
   }

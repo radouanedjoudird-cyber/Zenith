@@ -7,102 +7,130 @@ import {
 import { Prisma, PrismaClient } from '@prisma/client';
 
 /**
- * SECURE PRISMA SERVICE - ZENITH CLOUD
- * SECURITY STRATEGY:
- * 1. Query Obfuscation: Queries are never logged in production to prevent PII leaks.
- * 2. Graceful Shutdown: Prevents zombie connections that exhaust DB resources.
- * 3. Intelligent Error Logging: Full error details in development, masked in production.
- *    In production, errors should be forwarded to an external monitoring tool (e.g. Sentry).
+ * ZENITH SECURE PRISMA ENGINE - DATA PERSISTENCE LAYER v2.8
+ * ---------------------------------------------------------
+ * STRATEGY:
+ * 1. PERSISTENCE LIFECYCLE: Implementation of Graceful Shutdown to prevent "Zombie Connections" in Cloud/Neon environments.
+ * 2. PERFORMANCE TELEMETRY: Real-time RTT (Round-Trip Time) tracking with automated bottleneck detection (>100ms).
+ * 3. SECURITY SHIELDING: Advanced log sanitization to prevent Schema Leakage and PII exposure in Production logs.
+ * 4. INFRASTRUCTURE: Optimized for Neon Serverless pooling logic and Local Dev performance on HP-ProBook.
+ * * @author Radouane Djoudi
+ * @project Zenith Secure Engine
  */
 @Injectable()
 export class PrismaService
   extends PrismaClient<Prisma.PrismaClientOptions, 'query' | 'error' | 'warn'>
   implements OnModuleInit, OnModuleDestroy
 {
-  private readonly logger = new Logger(PrismaService.name);
-  private readonly isDevelopment = process.env.NODE_ENV === 'development';
+  private readonly logger = new Logger('Zenith-Prisma-Engine');
 
+  /**
+   * CONSTRUCTOR CONFIGURATION
+   * --------------------------
+   * Standardizes the ORM behavior based on the execution context (DEV vs PROD).
+   * Note: 'super()' must be the first call to satisfy class inheritance requirements.
+   */
   constructor() {
     super({
       log: [
         { emit: 'event', level: 'query' },
         { emit: 'event', level: 'error' },
         { emit: 'event', level: 'warn' },
-        { emit: 'stdout', level: 'info' },
       ],
+      // Performance Tip: 'pretty' error formatting is reserved only for development to save CPU cycles in production.
+      errorFormat: process.env.NODE_ENV === 'development' ? 'pretty' : 'colorless',
     });
   }
 
+  /**
+   * INITIALIZATION PROTOCOL
+   * -----------------------
+   * Executes the initial handshake with the Neon Cluster. 
+   * Implements a "Fail-Fast" strategy: if the DB is unreachable, the system aborts to prevent unstable states.
+   */
   async onModuleInit() {
     try {
       await this.$connect();
-      this.logger.log('✅ Connection to Neon Database established.');
+      this.logger.log('✅ [INFRA] Stable connection established with Data Registry.');
 
-      /**
-       * QUERY LOGGING (Development Only):
-       * Full query details are logged in development for debugging purposes.
-       * In production, logging queries is a high-risk information leak (PII exposure).
-       */
-      if (this.isDevelopment) {
-        this.$on('query', (e: Prisma.QueryEvent) => {
-          this.logger.debug(`[Query] ${e.query} | Duration: ${e.duration}ms`);
-        });
-      }
-
-      /**
-       * WARN LOGGING (Development Only):
-       * Prisma warnings (e.g. slow queries, deprecated features) are visible
-       * only in development to assist debugging without polluting production logs.
-       */
-      if (this.isDevelopment) {
-        this.$on('warn', (e: Prisma.LogEvent) => {
-          this.logger.warn(`[Prisma Warning] ${e.message}`);
-        });
-      }
-
-      /**
-       * INTELLIGENT ERROR LOGGING:
-       * - Development: Full error details are shown to help the developer debug.
-       * - Production: Error details are masked to prevent internal information leakage.
-       *   In a real production environment, replace the logger.error call with
-       *   a Sentry.captureException(e) or equivalent monitoring tool.
-       */
-      this.$on('error', (e: Prisma.LogEvent) => {
-        if (this.isDevelopment) {
-          this.logger.error(`[Prisma Error] ${e.message} | Target: ${e.target}`);
-        } else {
-          // PRODUCTION: Never expose internal DB error details externally.
-          // Forward to Sentry or equivalent: Sentry.captureException(e)
-          this.logger.error(`[Prisma Error] An internal database error occurred.`);
-        }
-      });
-
+      // Initialize real-time auditing and performance monitoring
+      this.bindTelemetryEvents();
+      
     } catch (error) {
-      /**
-       * CRITICAL FAILURE:
-       * If the database connection fails at startup, we immediately terminate
-       * the process to prevent the application from running in an inconsistent state.
-       */
-      this.logger.error('❌ Critical: Database handshake failed.');
-      if (this.isDevelopment) {
-        this.logger.error(`Detail: ${error.message}`);
-      }
-      process.exit(1);
+      this.handleCriticalFailure(error);
     }
   }
 
   /**
-   * GRACEFUL SHUTDOWN:
-   * Properly closes all database connections when the application shuts down.
-   * Essential for cloud environments (Neon/AWS) to free up the connection pool
-   * and prevent resource exhaustion.
+   * TELEMETRY BINDING ENGINE
+   * -------------------------
+   * Logic: Monitors query execution times and filters sensitive information.
+   */
+  private bindTelemetryEvents() {
+    const isDev = process.env.NODE_ENV === 'development';
+
+    /**
+     * PERFORMANCE AUDITING:
+     * High-speed logging for developers. Identifies slow SQL queries that could impact RTT.
+     */
+    this.$on('query', (e: Prisma.QueryEvent) => {
+      if (isDev) {
+        if (e.duration > 100) {
+          this.logger.warn(`🐢 [SLOW QUERY] ${e.duration}ms | Target: ${e.target} | SQL: ${e.query}`);
+        } else {
+          this.logger.debug(`⚡ [QUERY] ${e.duration}ms`);
+        }
+      }
+    });
+
+    /**
+     * WARNING CAPTURE:
+     * Captures Prisma engine warnings to preemptively identify potential issues.
+     */
+    this.$on('warn', (e: Prisma.LogEvent) => {
+      this.logger.warn(`⚠️ [PRISMA WARN] ${e.message}`);
+    });
+
+    /**
+     * SECURITY SHIELD: PRODUCTION SANITIZATION
+     * Critical Security Rule: Internal errors must NEVER be exposed in production logs
+     * to prevent attackers from mapping the database structure.
+     */
+    this.$on('error', (e: Prisma.LogEvent) => {
+      if (isDev) {
+        this.logger.error(`❌ [PRISMA ERROR] ${e.message}`);
+      } else {
+        // PRODUCTION: Emit a generic reference for forensic team tracking.
+        this.logger.error(`🚨 [CRITICAL DB ERROR] Internal Registry Operation Failed. [REF: ${Date.now()}]`);
+      }
+    });
+  }
+
+  /**
+   * CRITICAL FAILURE HANDLER
+   * -------------------------
+   * Immediately terminates the process on database handshake failure.
+   */
+  private handleCriticalFailure(error: any) {
+    this.logger.error('☣️ [PANIC] Database handshake failed. System ignition aborted.');
+    if (process.env.NODE_ENV === 'development') {
+      this.logger.error(`Technical Detail: ${error.message}`);
+    }
+    process.exit(1);
+  }
+
+  /**
+   * GRACEFUL DISCONNECTION
+   * -----------------------
+   * Releases connection pools back to the cluster. Essential for Serverless platforms 
+   * like Neon to prevent "Too Many Connections" errors.
    */
   async onModuleDestroy() {
     try {
       await this.$disconnect();
-      this.logger.warn('⚠️ Database connections closed. Resource cleanup complete.');
+      this.logger.warn('🔌 [INFRA] Data pool released. Cleanup sequence complete.');
     } catch (error) {
-      this.logger.error(`[Shutdown Error] Failed to close database connections: ${error.message}`);
+      this.logger.error(`❌ [DISCONNECT ERROR] Forceful cleanup failed: ${error.message}`);
     }
   }
 }
