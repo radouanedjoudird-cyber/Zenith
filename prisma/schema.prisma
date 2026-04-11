@@ -1,9 +1,11 @@
 // ZENITH CLOUD ARCHITECTURE - INFRASTRUCTURE LAYER v3.1
 // -----------------------------------------------------------------------------
+// @author Radouane Djoudi
+// @project Zenith Secure Engine
 // REFINEMENTS v3.1:
 // 1. SECURITY TUNING: Optimized hashedRt field for rapid cryptographic lookup.
 // 2. CONCURRENCY: Reinforced indexes to handle sub-millisecond session validation.
-// 3. AUDIT DEPTH: Prepared for Zero-Trust session tracking.
+// 3. AUDIT DEPTH: Prepared for Zero-Trust session tracking (AuditLog).
 
 generator client {
   provider      = "prisma-client-js"
@@ -46,27 +48,27 @@ model User {
   
   /**
    * ZENITH SHIELD: REFRESH TOKEN ROTATION HASH
-   * This field stores the PBKDF2/Bcrypt hash of the current RT.
-   * Indexed for sub-millisecond retrieval during rotation cycles.
+   * Stores the Bcrypt hash of the current RT.
+   * Logic: Indexed for sub-millisecond retrieval during rotation cycles.
    */
   hashedRt     String?  
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // RELATION: Granular Access Control
+  // RELATION: Granular Access Control (PBAC)
   permissions  UserPermission[]
 
   @@map("users")
   
   /**
    * PERFORMANCE INDEXES: 
-   * Vital for maintaining O(1) or O(log n) lookup speed during authentication.
+   * Vital for maintaining O(log n) lookup speed during high-concurrency Auth.
    */
   @@index([email])
   @@index([phoneNumber])
   @@index([role])
-  @@index([hashedRt]) // NEW: Added index to speed up session validation lookups
+  @@index([hashedRt]) 
 }
 
 // ==========================================
@@ -78,7 +80,7 @@ model UserPermission {
   userId  Int
   user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, action])
+  @@unique([userId, action]) // Integrity: Prevents redundant permission records
   @@index([action])
   @@map("user_permissions")
 }
@@ -89,13 +91,13 @@ model UserPermission {
 model AuditLog {
   id         Int         @id @default(autoincrement())
   action     String      
-  entity     String?     
-  entityId   String?     
+  entity     String?     // Target module (e.g., "Users", "Auth")
+  entityId   String?     // Specific record ID affected
   userId     Int?        
   userEmail  String?     
   ipAddress  String?     
   userAgent  String?     
-  details    Json?       
+  details    Json?       // Stores the delta or error stack
   
   severity   LogSeverity @default(INFO) 
   status     String      @default("SUCCESS") 
@@ -103,6 +105,10 @@ model AuditLog {
 
   @@map("audit_logs")
 
+  /**
+   * AUDIT INDEXES:
+   * Optimized for forensic dashboards and rapid security investigations.
+   */
   @@index([userId])
   @@index([action])
   @@index([severity])

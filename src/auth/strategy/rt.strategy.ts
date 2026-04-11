@@ -7,79 +7,83 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 /**
  * ZENITH REFRESH TOKEN STRATEGY - ARCHITECTURE v3.1
  * -----------------------------------------------------------
- * DESIGN PRINCIPLE: Dual-Layer Identity Verification.
- * * LAYER 1 (Stateless): Passport-JWT verifies the signature and expiration 
- * against the cryptographic secret.
- * * LAYER 2 (Stateful): Extracting the raw token string to allow the AuthService 
- * to perform "Reuse Detection" against the database hash.
- * * @author Radouane Djoudi
+ * @author Radouane Djoudi
  * @project Zenith Secure Engine
+ * * * DESIGN PRINCIPLE: Dual-Layer Identity Verification.
+ * 1. LAYER 1 (Stateless): Passport-JWT verifies digital signature & expiration.
+ * 2. LAYER 2 (Stateful): Raw token extraction for "Reuse Detection" against DB hash.
+ * * * SECURITY COMPLIANCE:
+ * - RFC 6749 Section 10.4 (Refresh Token Rotation).
+ * - Cryptographic Isolation: Dedicated RT_SECRET to prevent type-confusion.
  */
 @Injectable()
 export class RtStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
-  private readonly logger = new Logger('Zenith-RT-Guard');
+  private readonly logger = new Logger('Zenith-RT-Strategy');
 
   constructor(config: ConfigService) {
-    const refreshSecret = config.get<string>('JWT_REFRESH_SECRET');
+    const refreshSecret = config.get<string>('RT_SECRET');
 
-    // SECURITY CHECK: Fail-fast if the system environment is compromised (missing secrets).
+    /**
+     * FAIL-FAST SECURITY CHECK:
+     * Prevents the engine from starting if the cryptographic secret is missing.
+     * This is critical for maintaining the integrity of the 7-day session window.
+     */
     if (!refreshSecret) {
-      throw new Error('ZENITH_CORE_ERROR: JWT_REFRESH_SECRET is missing in environment registry.');
+      throw new Error('🛡️ ZENITH_CORE_ERROR: RT_SECRET is missing in environment registry.');
     }
 
     super({
-      // EXTRACTOR: We use the standard Bearer Token extraction from the 'Authorization' header.
+      // EXTRACTOR: Standard Bearer Token extraction from the 'Authorization' header.
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       
-      // EXPIRATION: Strict mode. If the 7-day window passes, Layer 1 will block the request.
+      // EXPIRATION: Mandatory rejection for tokens outside the expiration window.
       ignoreExpiration: false, 
       
-      // ISOLATION: Refresh tokens must use a different secret from Access tokens.
+      // ISOLATION: Refresh tokens MUST use a different secret from Access tokens.
       secretOrKey: refreshSecret,
       
-      // CONTEXT INJECTION: Passing 'req' to validate() is mandatory for Layer 2 security.
+      // CONTEXT INJECTION: Mandatory for Layer 2 'Reuse Detection' logic in AuthService.
       passReqToCallback: true,
     });
   }
 
   /**
-   * IDENTITY HYDRATION & EXTRACTION
-   * -------------------------------
-   * This method bridge the gap between the stateless JWT and our stateful security logic.
-   * * @param req The raw Express request.
-   * @param payload The decoded JWT payload (ID, Email, Role, Perms).
+   * IDENTITY HYDRATION & EXTRACTION:
+   * Bridges the gap between stateless JWT validation and stateful security logic.
+   * * @param req The incoming Express request object.
+   * @param payload The decoded high-entropy JWT payload.
    */
   async validate(req: Request, payload: any) {
     /**
      * ATOMIC EXTRACTION:
-     * We need the original, encoded JWT string. Why? 
-     * Because 'bcrypt.compare' needs the raw string to match it against the DB hash.
+     * We capture the original, encoded JWT string. This 'raw' token is essential
+     * for the 'bcrypt.compare' operation against the database-stored hash.
      */
     const authHeader = req?.get('authorization');
     const refreshToken = authHeader?.replace(/Bearer/i, '').trim();
 
     /**
-     * IPS TRIGGER:
-     * If Passport verified the JWT but we can't extract the string, 
-     * this indicates a malformed header or an injection attempt.
+     * SECURITY TRIGGER:
+     * Valid signature but failed extraction indicates a malformed header
+     * or a specialized injection attempt.
      */
     if (!refreshToken) {
-      this.logger.error(`🚨 [AUTH_FAIL] Extraction failed for user: ${payload.sub}`);
+      this.logger.error(`🚨 [AUTH_FAIL] RT Extraction failed for subject: ${payload.sub}`);
       throw new ForbiddenException('Zenith Shield: Refresh context compromised.');
     }
 
     /**
-     * UNIFIED IDENTITY OBJECT:
-     * We return a rich object that becomes 'req.user'. 
-     * Including the 'refreshToken' here is what enables the 'Reuse Detection' 
-     * in AuthService.refreshTokens().
+     * UNIFIED IDENTITY MAPPING:
+     * Injects the raw refreshToken into the request context (req.user).
+     * This allows the downstream AuthService to perform the RTR verification.
      */
     return {
-      id: payload.sub,
+      sub: payload.sub,           // Legacy alignment (Standard JWT Claim)
+      id: payload.sub,            // Modern developer-friendly alias
       email: payload.email,
       role: payload.role,
-      permissions: payload.perms, // Maintaining Granular PBAC
-      refreshToken,               // The 'Secret' required for the next rotation
+      permissions: payload.perms, // PBAC consistency
+      refreshToken,               // Essential for the "Burn-on-Use" protocol
     };
   }
 }

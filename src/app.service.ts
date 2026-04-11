@@ -1,27 +1,34 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 /**
- * SECURE APP SERVICE
- * Handles core application-level logic.
- * SECURITY STRATEGY:
- * 1. Centralized Logging: Monitor service health internally.
- * 2. Minimalist Output: Avoid leaking system status or versioning to the public.
+ * ZENITH APP SERVICE - CORE OPERATIONAL LOGIC v1.2
+ * ------------------------------------------------
+ * @author Radouane Djoudi
+ * @project Zenith Secure Engine
+ * * * ARCHITECTURAL ROLE:
+ * Provides core application-level utility and system health telemetry.
+ * * * SECURITY STRATEGY:
+ * 1. CENTRALIZED_LOGGING: Monitors service availability via internal audit logs.
+ * 2. MINIMALIST_LEAKAGE: Prevents version/infrastructure exposure in public strings.
  */
 @Injectable()
 export class AppService {
-  private readonly logger = new Logger(AppService.name);
+  private readonly logger = new Logger('Zenith-App-Service');
 
   /**
-   * GET HELLO
-   * Returns a standard operational status.
+   * SYSTEM HEALTH CHECK (GET_HELLO)
+   * -------------------------------
+   * Serves as a neutral, high-speed endpoint for load balancers and uptime monitors.
+   * COMPLIANCE: Adheres to 'Security-by-Obscurity' by returning non-descriptive status.
+   * * @returns {string} Operational status message.
    */
   getHello(): string {
     /**
-     * SECURITY: We use a neutral, professional message.
-     * In production, this can be used by Load Balancers (like Nginx)
-     * to check if the service is alive without exposing internal details.
+     * TELEMETRY:
+     * This log entry is crucial for forensic analysis if the system is being
+     * probed by scanners. It tracks frequency and ingress at the root level.
      */
-    this.logger.log('Health check: Root endpoint accessed.');
+    this.logger.log('🛡️ [HEALTH_CHECK] Root gateway reached. Status: OPERATIONAL');
     
     return 'Zenith Cloud API: Operational';
   }

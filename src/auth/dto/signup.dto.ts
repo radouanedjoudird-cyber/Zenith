@@ -13,14 +13,13 @@ import {
 /**
  * DATA TRANSFER OBJECT: SIGNUP PROTOCOL (SHIELDED EDITION)
  * --------------------------------------------------------
- * ARCHITECTURE: Enterprise Secure Identity Management
- * * SECURITY MEASURES:
- * 1. XSS MITIGATION: High-speed Regex stripping for HTML injection prevention.
- * 2. DATA NORMALIZATION: Canonical form enforcement (lowercase/trimmed) for DB indexing.
- * 3. CRYPTOGRAPHIC ENTROPY: Minimum 10-char password with multi-class character requirements.
- * 4. PRIVILEGE ISOLATION: Role field is strictly excluded to prevent unauthorized elevation.
- * * @author Radouane Djoudi
+ * @author Radouane Djoudi
  * @project Zenith Secure Engine
+ * * * SECURITY MEASURES:
+ * 1. XSS_MITIGATION: High-speed Regex stripping for HTML injection prevention.
+ * 2. DATA_NORMALIZATION: Canonical form enforcement (lowercase/trimmed) for DB indexing.
+ * 3. CRYPTOGRAPHIC_ENTROPY: Minimum 10-char password with multi-class requirements.
+ * 4. PRIVILEGE_ISOLATION: Role field is strictly excluded to prevent unauthorized elevation.
  */
 export class SignupDto {
   
@@ -33,7 +32,7 @@ export class SignupDto {
   @MaxLength(50)
   /**
    * INGRESS SANITIZATION:
-   * Prevents persistent XSS by stripping potential script tags before they reach the DB layer.
+   * Prevents persistent XSS by stripping potential script tags before they reach the DB.
    */
   @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/<[^>]*>?/gm, '') : value)
   firstName: string;
@@ -47,7 +46,7 @@ export class SignupDto {
   @MaxLength(50)
   /**
    * CANONICAL NORMALIZATION:
-   * Standardizes family names to lowercase to prevent duplicate entries and optimize B-Tree indexing.
+   * Standardizes family names to lowercase to optimize B-Tree indexing and search operations.
    */
   @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase().replace(/<[^>]*>?/gm, '') : value)
   familyName: string;
@@ -60,14 +59,14 @@ export class SignupDto {
   @IsNotEmpty()
   /**
    * SPACE STRIPPING:
-   * Cleans internal whitespaces to ensure consistent storage in the Infrastructure layer.
+   * Cleans internal whitespaces to ensure consistent storage and indexing.
    */
   @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/\s/g, '') : value)
   phoneNumber: string;
 
   @ApiProperty({ 
     example: 'contact@zenith-systems.dz', 
-    description: 'Unique identifier for communication and authentication.' 
+    description: 'Unique identifier for authentication. Enforced unique in the Infrastructure layer.' 
   })
   @IsEmail({}, { message: 'Security Alert: Malformed email structure detected.' })
   @IsNotEmpty()
@@ -85,7 +84,7 @@ export class SignupDto {
   @MaxLength(32)
   /**
    * MIL-SPEC ENTROPY ENFORCEMENT:
-   * Regex validates for Upper, Lower, Number, and Special character sets.
+   * Regex validates for Upper, Lower, Number, and Special character sets to ensure cryptographic strength.
    */
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_#^()])[A-Za-z\d@$!%*?&_#^()]{10,32}$/, {
     message: 'Security Policy Failure: Password complexity (10-32 chars, mix of types) not met.',
@@ -94,8 +93,7 @@ export class SignupDto {
 
   /**
    * NOTE ON AUTHORIZATION:
-   * The 'role' field is intentionally OMITTED from SignupDto.
-   * All new identities are defaulted to USER in the Service layer.
-   * Privilege escalation is handled via an audited Administrative Endpoint.
+   * The 'role' field is OMITTED to prevent "Privilege Escalation" attacks during signup.
+   * New accounts are defaulted to 'USER' via the core service logic.
    */
 }

@@ -5,29 +5,28 @@ import { IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'cl
 /**
  * DATA TRANSFER OBJECT: SIGNIN PROTOCOL (SHIELDED)
  * -----------------------------------------------
- * ARCHITECTURE: Enterprise Secure Access Gateway
- * * SECURITY MEASURES:
- * 1. ANTI-ENUMERATION: Generic error messaging to mitigate account harvesting.
- * 2. PAYLOAD NORMALIZATION: Canonical email formatting to ensure DB index hits.
- * 3. INJECTION PREVENTION: Whitelist regex enforcement on password stream.
- * * @author Radouane Djoudi
+ * @author Radouane Djoudi
  * @project Zenith Secure Engine
+ * * * SECURITY STRATEGY:
+ * 1. ANTI-ENUMERATION: Generic error messaging to mitigate account harvesting.
+ * 2. PAYLOAD_NORMALIZATION: Canonical email formatting for high-speed DB index hits.
+ * 3. INJECTION_PREVENTION: Strict regex whitelisting on the password stream.
  */
 export class SigninDto {
 
   @ApiProperty({ 
     example: 'admin@zenith-systems.dz', 
-    description: 'Registered email address. Case-insensitive.' 
+    description: 'Registered identity email. Case-insensitive.' 
   })
   /**
    * CREDENTIAL NORMALIZATION:
-   * Forces lowercase to ensure consistency with the DB unique index.
-   * Generic error message prevents 'Account Discovery' attacks.
+   * Trims and lowercases the input before validation to ensure it matches
+   * the unique index in the 'users' table.
    */
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail({}, { message: 'Authentication failed: Invalid credentials.' })
   @IsNotEmpty()
   @MaxLength(100)
-  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   email: string;
 
   @ApiProperty({ 
@@ -35,9 +34,9 @@ export class SigninDto {
     description: 'Cryptographic password string.' 
   })
   /**
-   * SYMMETRIC VALIDATION:
-   * Aligned with Signup entropy but utilizes a generic message.
-   * Whitelisting allowed characters to block complex injection payloads.
+   * ENTROPY & INJECTION CONTROL:
+   * Aligned with signup complexity. The regex blocks common SQLi and XSS payloads
+   * by restricting characters to a secure set.
    */
   @IsString()
   @IsNotEmpty()

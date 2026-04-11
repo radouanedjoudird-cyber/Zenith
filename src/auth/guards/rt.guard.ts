@@ -8,63 +8,67 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 
 /**
- * ZENITH REFRESH GUARD - KERNEL v4.0
+ * ZENITH REFRESH GUARD (RtGuard) - SECURITY KERNEL v4.0
  * ------------------------------------------------------------------
  * @author Radouane Djoudi
  * @project Zenith Secure Engine
- * * ROLE IN ARCHITECTURE:
- * This Guard acts as the primary interceptor for the Refresh Token Rotation (RTR).
- * It bridges the gap between Passport's cryptographic validation and our
- * Service-level 'Reuse Detection' logic.
- * * SECURITY COMPLIANCE:
- * 1. FALLTHROUGH_PROTECTION: Ensures no unauthenticated request hits the controller.
- * 2. AUDIT_TRAIL: Logs every failed attempt with IP metadata for forensics.
- * 3. ERROR_SHIELDING: Masks internal errors to prevent side-channel leakage.
+ * * * ARCHITECTURAL ROLE:
+ * Acts as the primary interceptor for the Refresh Token Rotation (RTR) cycle.
+ * Bridges Passport's cryptographic validation with Service-level 'Reuse Detection'.
+ * * * SECURITY COMPLIANCE:
+ * 1. FALLTHROUGH_PROTECTION: Ensures no unauthorized ingress to the refresh controller.
+ * 2. AUDIT_TRAIL: Logs rejections with IP and forensic metadata for SIEM analysis.
+ * 3. EXCEPTION_SHIELDING: Strategically maps 401/403 responses for client-side state control.
  */
 @Injectable()
 export class RtGuard extends AuthGuard('jwt-refresh') {
   private readonly logger = new Logger('Zenith-RT-Guard');
 
   /**
-   * REQUEST HANDLER INTERCEPTOR
-   * ---------------------------
-   * Overrides the default behavior to provide granular error handling.
-   * This is where we decide if a failure is a simple 401 or a critical breach.
+   * HANDLE_REQUEST INTERCEPTOR:
+   * Overrides the default behavior to provide granular lifecycle control.
+   * Maps cryptographic failures to specific, actionable security exceptions.
    */
   handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-    // 1. ATOMIC CHECK: If the Passport strategy found a critical cryptographic error
+    // [PHASE 1] ATOMIC VALIDATION: Check for strategy errors or missing identity payload
     if (err || !user) {
       const request = context.switchToHttp().getRequest();
       const ip = request.ip || request.headers['x-forwarded-for'] || '0.0.0.0';
 
       /**
        * FORENSIC LOGGING:
-       * Capturing the exact reason for failure (Expired, Malformed, Missing).
+       * Capturing the precise failure vector (Expired, Malformed, Missing)
+       * for internal engine telemetry on the HP-ProBook logs.
        */
+      const failureReason = info?.message || (err ? err.message : 'NULL_TOKEN_INGRESS');
+      
       this.logger.error(
-        `🚨 [SECURITY_ALERT] RT Gate Blocked | IP: ${ip} | Reason: ${info?.message || 'NULL_TOKEN'}`,
+        `🚨 [SECURITY_ALERT] RT Gate Blocked | IP: ${ip} | Reason: ${failureReason}`,
       );
 
       /**
-       * EXCEPTION DIFFERENTIATION:
-       * If the token is expired, we throw a 403 to force the client to re-login,
-       * preventing 'Infinite Refresh' loops that hackers might exploit.
+       * [RTR PROTOCOL - EXCEPTION DIFFERENTIATION]
+       * IF EXPIRED (403): Signals the Frontend (Vue.js) to trigger a full logout
+       * and purge all local storage/session credentials.
        */
       if (info?.message === 'jwt expired') {
-        throw new ForbiddenException('Zenith Guard: Token has expired. Immediate re-authentication required.');
+        throw new ForbiddenException(
+          'Zenith Guard: Session expired. Immediate re-authentication required.'
+        );
       }
 
       /**
-       * GENERIC SHIELD:
-       * Throwing a 401 for missing or malformed tokens to maintain stealth.
+       * [STEALTH MODE]
+       * RETURN 401 (Unauthorized): For malformed or missing tokens to keep the
+       * system's security posture ambiguous to external reconnaissance probes.
        */
       throw new UnauthorizedException('Zenith Guard: Session access denied.');
     }
 
     /**
-     * PASS-THROUGH:
-     * If the token is cryptographically valid, we attach the user object 
-     * (which includes the raw RT from RtStrategy) to the request context.
+     * [IDENTITY PASS-THROUGH]
+     * Returns the user object (Hydrated by RtStrategy with the raw refreshToken)
+     * to the request context for the second layer of verification (DB Hash).
      */
     return user;
   }

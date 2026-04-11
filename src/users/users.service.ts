@@ -13,20 +13,22 @@ import { UpdateUserDto } from './dto';
 /**
  * ZENITH IDENTITY SERVICE - CORE ENGINE v2.6
  * -----------------------------------------
- * ARCHITECTURE: High-Performance User Lifecycle Management (PBAC Ready).
- * STRATEGY: 
- * 1. ZERO-LEAK PROJECTION: Multi-layer attribute whitelisting.
- * 2. PERFORMANCE TUNING: Intelligent selection to minimize RTT with Neon DB.
- * 3. SECURITY INTEGRITY: Dynamic salt rounds and error masking.
- * * @author Radouane Djoudi
+ * @author Radouane Djoudi
+ * @project Zenith Secure Engine
+ * * * ARCHITECTURE: High-Performance User Lifecycle (PBAC Ready).
+ * * * SECURITY STRATEGY: 
+ * 1. ZERO-LEAK_PROJECTION: Surgical attribute whitelisting via 'safeProfile'.
+ * 2. ATOMIC_CONSISTENCY: Ensures profile synchronization is transactionally safe.
+ * 3. HASH_ROTATION: Dynamic re-salting for password updates (Work Factor 12).
  */
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger('Zenith-Users-Engine');
   
   /**
-   * DATA SHIELDING: 
-   * Whitelists only safe attributes. Password & Tokens are isolated by default.
+   * DATA SHIELDING (PROJECTION): 
+   * Whitelists only non-sensitive attributes. 
+   * Passwords and HashedRTs are strictly isolated from the return stream.
    */
   private readonly safeProfile = { 
     id: true, 
@@ -36,7 +38,6 @@ export class UsersService {
     role: true, 
     phoneNumber: true, 
     createdAt: true,
-    // Including permissions count or names can be useful for UI hydration
     permissions: {
       select: { action: true }
     }
@@ -46,7 +47,7 @@ export class UsersService {
 
   /**
    * FETCH AUTHENTICATED IDENTITY
-   * Uses 'select' for surgical data retrieval, reducing database payload.
+   * Surgical retrieval to minimize network RTT and memory footprint.
    */
   async getMe(userId: number) {
     const user = await this.prisma.user.findUnique({
@@ -63,20 +64,23 @@ export class UsersService {
 
   /**
    * PARTIAL IDENTITY SYNCHRONIZATION
-   * Optimized to handle high-frequency profile updates with atomic consistency.
+   * Handles conditional hashing for passwords and updates user metadata.
    */
   async updateMe(userId: number, dto: UpdateUserDto) {
     try {
-      // 1. Prepare data and handle conditional hashing
       const { password, ...otherData } = dto;
       const dataToUpdate: Prisma.UserUpdateInput = { ...otherData };
 
+      /**
+       * CONDITIONAL CRYPTOGRAPHY:
+       * Only triggers bcrypt if a new password is provided in the DTO.
+       * Work Factor 12 selected for balance between security and performance.
+       */
       if (password) {
         dataToUpdate.password = await bcrypt.hash(password, 12);
         this.logger.warn(`🔐 [SECURITY_EVENT] Password rotation triggered for ID: ${userId}`);
       }
 
-      // 2. Atomic update with surgical selection
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
         data: dataToUpdate,
@@ -93,12 +97,14 @@ export class UsersService {
 
   /**
    * IDENTITY TERMINATION PROTOCOL
-   * Warning: This operation is irreversible and audited by the forensic engine.
+   * IRREVERSIBLE: Purges the user identity from the Zenith registry.
    */
   async deleteMe(userId: number) {
     try {
+      // Logic: Atomic delete operation.
       await this.prisma.user.delete({ where: { id: userId } });
       this.logger.warn(`💀 [IDENTITY_PURGE] Hard-delete executed for ID: ${userId}`);
+      
       return { 
         status: 'SUCCESS', 
         message: 'Identity purged from Zenith Registry.' 
@@ -109,8 +115,8 @@ export class UsersService {
   }
 
   /**
-   * GLOBAL DIRECTORY ACCESS (Admin Only)
-   * Performance: Implements descending order by default for governance clarity.
+   * GLOBAL DIRECTORY ACCESS (GOVERNANCE)
+   * Returns all users sorted by creation date for administrative clarity.
    */
   async getAllUsers() {
     this.logger.debug('📊 [ADMIN_GOVERNANCE] Querying global registry.');
@@ -121,7 +127,7 @@ export class UsersService {
   }
 
   /**
-   * SURGICAL IDENTITY LOOKUP
+   * SURGICAL IDENTITY LOOKUP BY ID
    */
   async getUserById(userId: number) {
     const user = await this.prisma.user.findUnique({
@@ -134,11 +140,13 @@ export class UsersService {
   }
 
   /**
-   * ERROR MITIGATION HANDLER
-   * Standardizes database exceptions into clear, secure API responses.
+   * DATABASE EXCEPTION MITIGATION
+   * Standardizes raw Prisma errors into sanitized API responses 
+   * to prevent DB-Schema leaking.
    */
   private handlePrismaError(error: any, userId: number) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      // P2002: Unique constraint violation (e.g. email already exists)
       if (error.code === 'P2002') {
         throw new ConflictException('Identity Conflict: Unique constraint violation (Email/Phone).');
       }

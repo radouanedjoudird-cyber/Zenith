@@ -2,21 +2,25 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 
 /**
- * SECURE PRISMA DATABASE MODULE - ZENITH CLOUD
- * SECURITY STRATEGY:
- * 1. Global Singleton: Prevents "Connection Exhaustion" (DoS) by reusing a single pool.
- * 2. Encapsulation: Only exports the Service, hiding the underlying DB engine logic.
- * 3. Lifecycle Management: PrismaService handles its own clean disconnects.
+ * ZENITH SECURE PRISMA MODULE - GLOBAL PERSISTENCE HUB v2.0
+ * ---------------------------------------------------------
+ * @author Radouane Djoudi
+ * @project Zenith Secure Engine
+ * * * SECURITY & PERFORMANCE STRATEGY:
+ * 1. GLOBAL_SINGLETON: Ensures a single connection pool across the entire kernel.
+ * 2. CONNECTION_LIMIT_PROTECTION: Prevents exhaustion (DoS) on Neon/PostgreSQL clusters.
+ * 3. ENCAPSULATION: Masks complex ORM logic, exposing only the hardened service.
+ * 4. IO_EFFICIENCY: Reduces overhead by reusing the same Prisma instance in all modules.
  */
 @Global()
 @Module({
   providers: [
+    /**
+     * EXPLICIT PROVIDER DEFINITION:
+     * We use a single class provider to ensure the 'Zenith-Prisma-Engine'
+     * is instantiated exactly once during the kernel boot sequence.
+     */
     {
-      /**
-       * EXPLICIT PROVIDER DEFINITION:
-       * Ensures that the PrismaService is instantiated exactly once.
-       * This is critical for maintaining connection limits on Neon/PostgreSQL.
-       */
       provide: PrismaService,
       useClass: PrismaService,
     },
@@ -24,8 +28,8 @@ import { PrismaService } from './prisma.service';
   exports: [
     /**
      * EXPOSURE CONTROL:
-     * We only export the Service. Any module using this must follow 
-     * the security patterns we've defined in PrismaService (like logging control).
+     * Exporting the Service makes it injectable globally (due to @Global),
+     * enabling Auth, Users, and Audit modules to access the DB layer safely.
      */
     PrismaService,
   ],

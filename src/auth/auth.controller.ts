@@ -24,12 +24,11 @@ import { RtGuard } from './guards/rt.guard';
  * ------------------------------------------------------------------
  * @author Radouane Djoudi
  * @project Zenith Secure Engine
- * @description Central orchestration for identity lifecycle, PBAC claims, and session security.
- * * CORE SECURITY PRINCIPLES:
- * 1. DEFENSE-IN-DEPTH: Layered validation (Throttling -> Guard -> Service Logic).
- * 2. RTR ENFORCEMENT: Strictly controls the Refresh Token Rotation lifecycle.
- * 3. TELEMETRY: Full logging of authentication state changes for audit readiness.
- * 4. ATOMICITY: Prevents partial session updates during cryptographic rotations.
+ * * * CORE SECURITY PRINCIPLES:
+ * 1. DEFENSE_IN_DEPTH: Layered validation (Throttling -> Guard -> Kernel Logic).
+ * 2. RTR_ENFORCEMENT: Strictly controls the 'Burn-on-Use' rotation lifecycle.
+ * 3. FORENSIC_TELEMETRY: Comprehensive logging for audit readiness.
+ * 4. PERFORMANCE: Optimized RTT for stateless session audits.
  */
 @ApiTags('Identity & Access Management')
 @Controller('auth')
@@ -38,22 +37,17 @@ export class AuthController {
 
   constructor(private readonly authService: AuthService) {}
 
-  // ===========================================================================
-  // SECTION: PUBLIC IDENTITY INGRESS
-  // ===========================================================================
-
   /**
    * IDENTITY PROVISIONING (SIGNUP)
    * ------------------------------
-   * Initiates a new user registry with baseline PBAC permissions.
-   * Protected by specialized Rate-Limiting to mitigate account exhaustion attacks.
+   * Registers a new subject. Protected by restrictive throttling to prevent
+   * automated registry exhaustion.
    */
-  @Public() 
-  @Throttle({ critical: { limit: 5, ttl: 60000 } }) 
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // Anti-Spam: 5 requests per minute
   @Post('signup')
   @ApiOperation({ summary: 'Identity Provisioning (Signup)' })
   @ApiResponse({ status: 201, description: 'Identity registry established successfully.' })
-  @ApiResponse({ status: 409, description: 'Identity collision: Email already exists.' })
   @HttpCode(HttpStatus.CREATED)
   async signup(@Body() signupDto: SignupDto) {
     this.logger.log(`🚀 [AUTH_INGRESS] Initiating provisioning for: ${signupDto.email}`);
@@ -63,53 +57,39 @@ export class AuthController {
   /**
    * SESSION AUTHENTICATION (SIGNIN)
    * -------------------------------
-   * Validates credentials and issues high-entropy AT/RT pairs.
-   * Leverages Anti-Enumeration logic within the kernel.
+   * Authenticates credentials and initializes the rotation cycle.
    */
-  @Public() 
-  @Throttle({ critical: { limit: 5, ttl: 60000 } }) 
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // Anti-Brute: 10 attempts per minute
   @Post('signin')
   @ApiOperation({ summary: 'Session Authentication (Signin)' })
   @ApiResponse({ status: 200, description: 'Cryptographic identity tokens issued.' })
-  @ApiResponse({ status: 401, description: 'Zenith Shield: Authentication failed.' })
   @HttpCode(HttpStatus.OK)
   async signin(@Body() signinDto: SigninDto) {
     this.logger.log(`🔑 [AUTH_INGRESS] Authenticating identity: ${signinDto.email}`);
     return await this.authService.signin(signinDto);
   }
 
-  // ===========================================================================
-  // SECTION: CRYPTOGRAPHIC SESSION OPERATIONS
-  // ===========================================================================
-
   /**
    * CRYPTOGRAPHIC TOKEN ROTATION (REFRESH)
    * --------------------------------------
-   * Performs the 'Burn-on-Use' protocol to rotate refresh credentials.
-   * This is the primary detection point for token theft (RTR).
-   * @throws ForbiddenException (403) If a reused or invalid token is presented.
+   * Logic: Executes the 'Burn-on-Use' protocol.
+   * COMPLIANCE: Validates the RT signature and persisted rotation hash.
    */
-  @Public() // Bypasses global AT guard, strictly filtered by RtGuard
+  @Public()
   @UseGuards(RtGuard)
   @Post('refresh')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Cryptographic Token Rotation (Refresh)' })
-  @ApiResponse({ status: 200, description: 'Rotation cycle complete. New credentials issued.' })
-  @ApiResponse({ status: 403, description: 'ZENITH_SHIELD: Breach detected / Token reuse attempt.' })
+  @ApiResponse({ status: 200, description: 'Rotation cycle complete. New tokens issued.' })
+  @ApiResponse({ status: 403, description: 'SECURITY_BREACH: Potential token reuse detected.' })
   @HttpCode(HttpStatus.OK)
   async refresh(@Req() req: Request) {
-    // ATOMIC EXTRACTION: Hydrated from the RtStrategy context
-    const userId = req.user?.['id'];
-    const rawRt = req.user?.['refreshToken'];
+    const userId = Number(req.user?.['sub'] || req.user?.['id']);
+    const refreshToken = req.user?.['refreshToken'];
 
     this.logger.log(`🔄 [AUTH_ROTATION] Executing RTR cycle for ID: ${userId}`);
-
-    /**
-     * CORE DEFENSE:
-     * Passing both the ID and the raw string to the service for DB-level validation.
-     * This ensures 403 Forbidden is triggered if the hash doesn't match the current state.
-     */
-    return await this.authService.refreshTokens(userId, rawRt);
+    return await this.authService.refreshTokens(userId, refreshToken);
   }
 
   /**
@@ -117,33 +97,31 @@ export class AuthController {
    * ------------------------------
    * Atomic revocation of the persistent session hash.
    */
-  @Public() 
+  @Public()
   @UseGuards(RtGuard)
   @Post('signout')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Session Termination (Signout)' })
-  @ApiResponse({ status: 200, description: 'Identity decoupled. Session registry cleared.' })
   @HttpCode(HttpStatus.OK)
   async signout(@Req() req: Request) {
-    const userId = req.user?.['id'];
-    this.logger.log(`🚪 [AUTH_REVOKE] Invalidating persistent session for ID: ${userId}`);
+    const userId = Number(req.user?.['sub'] || req.user?.['id']);
+    this.logger.log(`🚪 [AUTH_REVOKE] Invalidating session for ID: ${userId}`);
     return await this.authService.signout(userId);
   }
 
   /**
    * STATELESS SESSION AUDIT (STATUS)
    * --------------------------------
-   * Exposes active PBAC claims without database I/O.
+   * High-speed claim verification. Zero Database I/O.
    */
   @UseGuards(PermissionsGuard)
   @Permissions('AUTH_STATUS_VIEW')
   @Get('status')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Stateless Session Audit (Status)' })
-  @ApiResponse({ status: 200, description: 'Session telemetry exposed.' })
   @HttpCode(HttpStatus.OK)
   async getStatus(@Req() req: Request) {
-    const userId = req.user?.['id'];
+    const userId = Number(req.user?.['sub'] || req.user?.['id']);
     this.logger.log(`📡 [AUTH_AUDIT] Telemetry request | Identity ID: ${userId}`);
 
     return {
@@ -153,7 +131,7 @@ export class AuthController {
         id: userId,
         email: req.user?.['email'],
         role: req.user?.['role'],
-        permissions: req.user?.['permissions'], 
+        permissions: req.user?.['permissions'],
       },
     };
   }

@@ -12,20 +12,19 @@ import { UsersModule } from './users/users.module';
 /**
  * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v2.8
  * --------------------------------------------------
- * This module serves as the central nervous system of the Zenith platform.
- * * STRATEGY FOR HIGH-AVAILABILITY & SECURITY:
- * 1. ZERO-TRUST ARCHITECTURE: All routes are guarded by default via Global AtGuard.
- * 2. MULTI-LAYERED DEFENSE: Integrated Throttling, Authentication, and PBAC.
- * 3. PERFORMANCE TUNING: Config caching enabled for ultra-low latency on HP-ProBook.
- * 4. FORENSIC CONTINUITY: Asynchronous telemetry capture for all system state changes.
- * * @author Radouane Djoudi
- * @environment HP-ProBook / Linux-Production
+ * @author Radouane Djoudi
+ * @project Zenith Secure Engine
+ * * * ARCHITECTURAL STRATEGY:
+ * 1. SECURE_BY_DEFAULT: All routes require authentication unless marked @Public().
+ * 2. DEFENSE_IN_DEPTH: Sequenced Guards (Throttling -> Auth -> Permissions).
+ * 3. TELEMETRY_PIPELINE: Global interceptor for forensic state auditing.
+ * 4. RESOURCE_QUOTA: Multi-tier rate limiting to prevent infrastructure exhaustion.
  */
 @Module({
   imports: [
     /**
      * CONFIGURATION KERNEL:
-     * High-speed environment variable management with memory caching.
+     * Manages environment variables with high-performance memory caching.
      */
     ConfigModule.forRoot({
       isGlobal: true,
@@ -33,8 +32,10 @@ import { UsersModule } from './users/users.module';
     }),
 
     /**
-     * RATE LIMITING ENGINE (ANTI-DOS/BRUTE-FORCE):
-     * Protects the infrastructure layer from resource exhaustion and automated attacks.
+     * RATE LIMITING ENGINE (ANTI-DOS):
+     * Implements dual-tier protection:
+     * - Standard: General API navigation.
+     * - Critical: High-sensitivity endpoints (Auth/Write).
      */
     ThrottlerModule.forRoot([{
       name: 'standard',
@@ -43,26 +44,21 @@ import { UsersModule } from './users/users.module';
     }, {
       name: 'critical',
       ttl: 60000,
-      limit: 5,   // Strict limit for sensitive Auth/Write operations.
+      limit: 5,   
     }]),
 
     /**
-     * CORE INFRASTRUCTURE:
-     * PrismaModule handles connection pooling to Neon DB with optimized RTT.
+     * INFRASTRUCTURE & DOMAIN MODULES:
+     * Encapsulates persistence layers and business logic.
      */
     PrismaModule,
-
-    /**
-     * DOMAIN LOGIC MODULES:
-     * Encapsulates the core business logic of the Zenith platform.
-     */
     AuthModule,
     UsersModule,
   ],
   providers: [
     /**
-     * GLOBAL GUARD 1: RATE LIMITER
-     * Priority: High. First line of defense against network-level abuse.
+     * LAYER 1: NETWORK GUARD (ThrottlerGuard)
+     * Responsibility: Prevents resource exhaustion and brute-force attempts.
      */
     {
       provide: APP_GUARD,
@@ -70,9 +66,8 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * GLOBAL GUARD 2: ACCESS TOKEN VALIDATION (AT)
-     * Priority: Critical. Enforces "Secure by Default" strategy across all endpoints.
-     * Note: Public routes must be explicitly marked with @Public() decorator.
+     * LAYER 2: AUTHENTICATION GUARD (AtGuard)
+     * Responsibility: Validates identity. Enforces mandatory JWT check globally.
      */
     {
       provide: APP_GUARD,
@@ -80,8 +75,8 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * GLOBAL GUARD 3: PERMISSION-BASED ACCESS CONTROL (PBAC)
-     * Priority: Essential. Validates granular permissions for authenticated users.
+     * LAYER 3: AUTHORIZATION GUARD (PermissionsGuard)
+     * Responsibility: Validates granular PBAC claims injected into req.user.
      */
     {
       provide: APP_GUARD,
@@ -89,8 +84,8 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * GLOBAL INTERCEPTOR: FORENSIC TELEMETRY
-     * Post-Execution capture for auditing and security compliance.
+     * POST-EXECUTION: AUDIT INTERCEPTOR
+     * Responsibility: Captures successful/failed actions for security compliance.
      */
     {
       provide: APP_INTERCEPTOR,

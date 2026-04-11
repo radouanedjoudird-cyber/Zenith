@@ -9,13 +9,13 @@ import { Prisma, PrismaClient } from '@prisma/client';
 /**
  * ZENITH SECURE PRISMA ENGINE - DATA PERSISTENCE LAYER v2.8
  * ---------------------------------------------------------
- * STRATEGY:
- * 1. PERSISTENCE LIFECYCLE: Implementation of Graceful Shutdown to prevent "Zombie Connections" in Cloud/Neon environments.
- * 2. PERFORMANCE TELEMETRY: Real-time RTT (Round-Trip Time) tracking with automated bottleneck detection (>100ms).
- * 3. SECURITY SHIELDING: Advanced log sanitization to prevent Schema Leakage and PII exposure in Production logs.
- * 4. INFRASTRUCTURE: Optimized for Neon Serverless pooling logic and Local Dev performance on HP-ProBook.
- * * @author Radouane Djoudi
+ * @author Radouane Djoudi
  * @project Zenith Secure Engine
+ * * ARCHITECTURAL STRATEGY:
+ * 1. PERSISTENCE_LIFECYCLE: Graceful shutdown to prevent "Zombie Connections" in Neon/Serverless.
+ * 2. PERFORMANCE_TELEMETRY: Real-time RTT tracking with bottleneck detection (>100ms).
+ * 3. SECURITY_SHIELDING: Log sanitization to prevent Schema Leakage in production.
+ * 4. INFRASTRUCTURE: Optimized for connection pooling and high-concurrency workloads.
  */
 @Injectable()
 export class PrismaService
@@ -27,8 +27,7 @@ export class PrismaService
   /**
    * CONSTRUCTOR CONFIGURATION
    * --------------------------
-   * Standardizes the ORM behavior based on the execution context (DEV vs PROD).
-   * Note: 'super()' must be the first call to satisfy class inheritance requirements.
+   * Standardizes the ORM behavior based on the execution context.
    */
   constructor() {
     super({
@@ -37,7 +36,7 @@ export class PrismaService
         { emit: 'event', level: 'error' },
         { emit: 'event', level: 'warn' },
       ],
-      // Performance Tip: 'pretty' error formatting is reserved only for development to save CPU cycles in production.
+      // Error masking: 'pretty' formatting for local debugging, 'colorless' for logs parsing.
       errorFormat: process.env.NODE_ENV === 'development' ? 'pretty' : 'colorless',
     });
   }
@@ -45,8 +44,7 @@ export class PrismaService
   /**
    * INITIALIZATION PROTOCOL
    * -----------------------
-   * Executes the initial handshake with the Neon Cluster. 
-   * Implements a "Fail-Fast" strategy: if the DB is unreachable, the system aborts to prevent unstable states.
+   * Handshake with Neon Cluster. Implements "Fail-Fast" to avoid unstable application states.
    */
   async onModuleInit() {
     try {
@@ -64,14 +62,14 @@ export class PrismaService
   /**
    * TELEMETRY BINDING ENGINE
    * -------------------------
-   * Logic: Monitors query execution times and filters sensitive information.
+   * Logic: Monitors query execution times and applies security filters.
    */
   private bindTelemetryEvents() {
     const isDev = process.env.NODE_ENV === 'development';
 
     /**
      * PERFORMANCE AUDITING:
-     * High-speed logging for developers. Identifies slow SQL queries that could impact RTT.
+     * High-speed logging. Identifies slow SQL queries that could impact RTT on HP-ProBook.
      */
     this.$on('query', (e: Prisma.QueryEvent) => {
       if (isDev) {
@@ -85,7 +83,7 @@ export class PrismaService
 
     /**
      * WARNING CAPTURE:
-     * Captures Prisma engine warnings to preemptively identify potential issues.
+     * Preemptively identify potential indexing or connection issues.
      */
     this.$on('warn', (e: Prisma.LogEvent) => {
       this.logger.warn(`⚠️ [PRISMA WARN] ${e.message}`);
@@ -93,14 +91,14 @@ export class PrismaService
 
     /**
      * SECURITY SHIELD: PRODUCTION SANITIZATION
-     * Critical Security Rule: Internal errors must NEVER be exposed in production logs
-     * to prevent attackers from mapping the database structure.
+     * Critical: Internal errors must NEVER be exposed in production logs
+     * to prevent attackers from reverse-engineering the schema.
      */
     this.$on('error', (e: Prisma.LogEvent) => {
       if (isDev) {
         this.logger.error(`❌ [PRISMA ERROR] ${e.message}`);
       } else {
-        // PRODUCTION: Emit a generic reference for forensic team tracking.
+        // PRODUCTION: Generic reference for forensic team tracking.
         this.logger.error(`🚨 [CRITICAL DB ERROR] Internal Registry Operation Failed. [REF: ${Date.now()}]`);
       }
     });
@@ -109,7 +107,7 @@ export class PrismaService
   /**
    * CRITICAL FAILURE HANDLER
    * -------------------------
-   * Immediately terminates the process on database handshake failure.
+   * Terminates process on handshake failure to prevent 'Zombie' nodes.
    */
   private handleCriticalFailure(error: any) {
     this.logger.error('☣️ [PANIC] Database handshake failed. System ignition aborted.');
@@ -122,8 +120,7 @@ export class PrismaService
   /**
    * GRACEFUL DISCONNECTION
    * -----------------------
-   * Releases connection pools back to the cluster. Essential for Serverless platforms 
-   * like Neon to prevent "Too Many Connections" errors.
+   * Essential for Serverless platforms (Neon) to prevent pool exhaustion.
    */
   async onModuleDestroy() {
     try {
