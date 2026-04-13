@@ -6,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseIntPipe,
   Patch,
   UseGuards,
   UseInterceptors,
@@ -21,20 +20,20 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 /**
- * ZENITH USERS CONTROLLER - ENTERPRISE IDENTITY MANAGEMENT v2.8
- * -------------------------------------------------------------
+ * ZENITH USERS CONTROLLER - ENTERPRISE IDENTITY MANAGEMENT v4.1 (MongoDB Edition)
+ * -------------------------------------------------------------------------------
  * @author Radouane Djoudi
  * @project Zenith Secure Engine
  * * * SECURITY GOVERNANCE:
  * 1. PBAC (Permission-Based Access Control): Enforces "Principle of Least Privilege".
- * 2. IDENTITY_SYMMETRY: Integrated with AtGuard for stateless resolution.
+ * 2. MIGRATION: Refactored for String-based BSON ObjectIDs.
  * 3. FORENSIC_TELEMETRY: Automated capture of state-changing transactions.
  * 4. API_STABILITY: Implements URI-based versioning (v1).
  */
 @ApiTags('Identity & Access Management')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AtGuard, PermissionsGuard) // Layered Defense: Auth + Permission Checks
-@UseInterceptors(AuditInterceptor)     // Telemetry: Every change is audited
+@UseGuards(AtGuard, PermissionsGuard)
+@UseInterceptors(AuditInterceptor)
 @Controller({ path: 'users', version: '1' })
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -45,45 +44,35 @@ export class UsersController {
 
   /**
    * SELF-PROFILE RETRIEVAL
-   * ----------------------
-   * Access: Subject's own secure data.
    */
   @Permissions('PROFILE_READ')
   @Get('me')
   @ApiOperation({ summary: 'Retrieve personal profile' })
   @ApiResponse({ status: 200, description: 'Identity context retrieved successfully.' })
-  getMe(@GetCurrentUserId() userId: number) {
-    /**
-     * SECURITY: userId is extracted from JWT (req.user.id), 
-     * making it immune to parameter tampering.
-     */
+  getMe(@GetCurrentUserId() userId: string) { // Changed to string
     return this.usersService.getMe(userId);
   }
 
   /**
    * SELF-PROFILE MODIFICATION
-   * -------------------------
-   * Logic: Partial update with mass-assignment protection via DTO.
    */
   @Permissions('PROFILE_UPDATE')
   @Patch('me')
   @ApiOperation({ summary: 'Update profile attributes' })
   @ApiResponse({ status: 200, description: 'Profile updated and audited.' })
-  updateMe(@GetCurrentUserId() userId: number, @Body() dto: UpdateUserDto) {
+  updateMe(@GetCurrentUserId() userId: string, @Body() dto: UpdateUserDto) { // Changed to string
     return this.usersService.updateMe(userId, dto);
   }
 
   /**
    * SELF-INITIATED ACCOUNT TERMINATION
-   * ----------------------------------
-   * Logic: Critical event. Logged as HIGH-SEVERITY in Audit Logs.
    */
   @Permissions('PROFILE_DELETE')
   @Delete('me')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Self-initiated account termination' })
   @ApiResponse({ status: 200, description: 'Identity purged from registry.' })
-  deleteMe(@GetCurrentUserId() userId: number) {
+  deleteMe(@GetCurrentUserId() userId: string) { // Changed to string
     return this.usersService.deleteMe(userId);
   }
 
@@ -93,8 +82,6 @@ export class UsersController {
 
   /**
    * GLOBAL REGISTRY DISCOVERY
-   * -------------------------
-   * Access: Administrative lookup only.
    */
   @Permissions('USER_VIEW_ALL')
   @Get()
@@ -105,13 +92,12 @@ export class UsersController {
 
   /**
    * TARGETED IDENTITY LOOKUP
-   * ------------------------
-   * Logic: Surgical ID lookup with Type-Safety (ParseIntPipe).
+   * REFINED: Removed ParseIntPipe to support MongoDB BSON ObjectIDs (String).
    */
   @Permissions('USER_VIEW_SINGLE')
   @Get(':id')
   @ApiOperation({ summary: 'Targeted identity lookup [ELEVATED ONLY]' })
-  getUserById(@Param('id', ParseIntPipe) id: number) {
+  getUserById(@Param('id') id: string) { // Removed ParseIntPipe and changed to string
     return this.usersService.getUserById(id);
   }
 }

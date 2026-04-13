@@ -1,11 +1,13 @@
-// ZENITH CLOUD ARCHITECTURE - INFRASTRUCTURE LAYER v3.1
+// -----------------------------------------------------------------------------
+// ZENITH CLOUD ARCHITECTURE - INFRASTRUCTURE LAYER v4.1 (MongoDB Edition)
 // -----------------------------------------------------------------------------
 // @author Radouane Djoudi
 // @project Zenith Secure Engine
-// REFINEMENTS v3.1:
-// 1. SECURITY TUNING: Optimized hashedRt field for rapid cryptographic lookup.
-// 2. CONCURRENCY: Reinforced indexes to handle sub-millisecond session validation.
-// 3. AUDIT DEPTH: Prepared for Zero-Trust session tracking (AuditLog).
+// REFINEMENTS v4.1:
+// 1. MIGRATION: Optimized for MongoDB BSON structure.
+// 2. BUG FIX: Resolved P1012 by removing redundant indexes on unique fields.
+// 3. PERFORMANCE: Leveraged native MongoDB indexing for role-based queries.
+// 4. STORAGE: Local persistent storage architecture for HP-ProBook.
 
 generator client {
   provider      = "prisma-client-js"
@@ -13,7 +15,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -38,18 +40,21 @@ enum LogSeverity {
 // USER CORE IDENTITY
 // ==========================================
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
+  /**
+   * PRIMARY IDENTITY: MongoDB BSON ObjectId.
+   * Mapping local "_id" to Prisma "id" for standard API consumption.
+   */
+  id           String           @id @default(auto()) @map("_id") @db.ObjectId
+  email        String           @unique // Auto-indexed by MongoDB via @unique
   password     String
   firstName    String
   familyName   String
-  phoneNumber  String   @unique
-  role         Role     @default(USER)
+  phoneNumber  String           @unique // Auto-indexed by MongoDB via @unique
+  role         Role             @default(USER)
   
   /**
    * ZENITH SHIELD: REFRESH TOKEN ROTATION HASH
    * Stores the Bcrypt hash of the current RT.
-   * Logic: Indexed for sub-millisecond retrieval during rotation cycles.
    */
   hashedRt     String?  
   
@@ -63,10 +68,9 @@ model User {
   
   /**
    * PERFORMANCE INDEXES: 
-   * Vital for maintaining O(log n) lookup speed during high-concurrency Auth.
+   * We only index non-unique fields here. 
+   * MongoDB automatically manages unique indexes for Email and PhoneNumber.
    */
-  @@index([email])
-  @@index([phoneNumber])
   @@index([role])
   @@index([hashedRt]) 
 }
@@ -75,12 +79,17 @@ model User {
 // PERMISSION SYSTEM (PBAC)
 // ==========================================
 model UserPermission {
-  id      Int    @id @default(autoincrement())
+  id      String @id @default(auto()) @map("_id") @db.ObjectId
   action  String // e.g., "PROFILE_READ", "USER_DELETE"
-  userId  Int
+  
+  /**
+   * FOREIGN KEY RELATIONSHIP:
+   * Must use @db.ObjectId to match the User model's ID type.
+   */
+  userId  String @db.ObjectId
   user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, action]) // Integrity: Prevents redundant permission records
+  @@unique([userId, action]) 
   @@index([action])
   @@map("user_permissions")
 }
@@ -89,15 +98,20 @@ model UserPermission {
 // FORENSIC AUDIT TRAIL
 // ==========================================
 model AuditLog {
-  id         Int         @id @default(autoincrement())
+  id         String      @id @default(auto()) @map("_id") @db.ObjectId
   action     String      
   entity     String?     // Target module (e.g., "Users", "Auth")
   entityId   String?     // Specific record ID affected
-  userId     Int?        
+  
+  /**
+   * AUDIT TRACEABILITY:
+   * Relational link preserved for strict forensic continuity.
+   */
+  userId     String?     @db.ObjectId
   userEmail  String?     
   ipAddress  String?     
   userAgent  String?     
-  details    Json?       // Stores the delta or error stack
+  details    Json?       // MongoDB native JSON support
   
   severity   LogSeverity @default(INFO) 
   status     String      @default("SUCCESS") 
@@ -107,7 +121,7 @@ model AuditLog {
 
   /**
    * AUDIT INDEXES:
-   * Optimized for forensic dashboards and rapid security investigations.
+   * Optimized for forensic dashboards and security telemetry.
    */
   @@index([userId])
   @@index([action])

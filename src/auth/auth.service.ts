@@ -13,15 +13,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SigninDto, SignupDto } from './dto';
 
 /**
- * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) - KERNEL v4.0
- * ------------------------------------------------------------------
+ * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) - KERNEL v4.1 (MongoDB Edition)
+ * -------------------------------------------------------------------------
  * @author Radouane Djoudi
  * @project Zenith Secure Engine
- * * * SECURITY PROTOCOLS ENFORCED:
- * 1. RTR (Refresh Token Rotation): Implements 'Burn-on-Use' to prevent replay attacks.
- * 2. ATOMIC_REVOCATION: Immediate session invalidation upon breach detection.
- * 3. CONSTANT_TIME_VERIFICATION: Mitigates side-channel timing attacks using dummy hashes.
- * 4. PBAC: Granular identity provisioning via UserPermission registry.
+ * * CORE SECURITY IMPLEMENTATIONS:
+ * 1. MIGRATION: Upgraded to String-based ObjectIDs for MongoDB compatibility.
+ * 2. RTR (Refresh Token Rotation): Enforces single-use session integrity.
+ * 3. CONSTANT_TIME_VERIFICATION: Guards against side-channel timing analysis.
+ * 4. PBAC: Fine-grained permission mapping for distributed IoT ecosystems.
  */
 @Injectable()
 export class AuthService {
@@ -35,11 +35,9 @@ export class AuthService {
 
   /**
    * IDENTITY PROVISIONING (SIGNUP)
-   * Registers a new subject and initializes default PBAC permissions.
    */
   async signup(dto: SignupDto) {
     try {
-      // Work Factor 12 ensures high resistance against brute-force
       const hashedPassword = await bcrypt.hash(dto.password, 12);
 
       const newUser = await this.prisma.user.create({
@@ -81,7 +79,6 @@ export class AuthService {
 
   /**
    * SESSION AUTHENTICATION (SIGNIN)
-   * Authenticates identity and initiates the cryptographic rotation cycle.
    */
   async signin(dto: SigninDto) {
     const user = await this.prisma.user.findUnique({
@@ -89,12 +86,6 @@ export class AuthService {
       select: { id: true, email: true, password: true, role: true, permissions: { select: { action: true } } },
     });
 
-    /**
-     * ANTI-ENUMERATION SHIELD:
-     * We use a dummy hash to perform a constant-time comparison even if the user
-     * doesn't exist. This prevents attackers from measuring server response time
-     * to guess valid emails (Side-channel attack).
-     */
     const dummyHash = '$2b$12$L8v4Y0U6U7S8T9V0W1X2Y3Z4A5B6C7D8E9F0G1H2I3J4K5L6M7N8O';
     const isPasswordValid = await bcrypt.compare(dto.password, user?.password || dummyHash);
 
@@ -112,9 +103,8 @@ export class AuthService {
 
   /**
    * REFRESH TOKEN ROTATION (RTR)
-   * Detects and prevents token reuse (Replay Attacks).
    */
-  async refreshTokens(userId: number, rawRt: string) {
+  async refreshTokens(userId: string, rawRt: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, hashedRt: true, email: true, role: true, permissions: { select: { action: true } } },
@@ -128,11 +118,6 @@ export class AuthService {
     const isRtValid = await bcrypt.compare(rawRt, user.hashedRt);
 
     if (!isRtValid) {
-      /**
-       * INTRUSION RESPONSE:
-       * If the token is reused, it's a critical indicator of theft.
-       * We invalidate the entire session chain (Wipe hashedRt).
-       */
       await this.signout(userId);
       this.logger.error(`🚨 [CRITICAL_SECURITY] Token Reuse Detected! | ID: ${userId} | ACTION: LOCKOUT`);
       throw new ForbiddenException('Zenith Shield: Security breach detected. All sessions revoked.');
@@ -149,9 +134,8 @@ export class AuthService {
 
   /**
    * SESSION TERMINATION (SIGNOUT)
-   * Decouples the session by purging the rotation hash.
    */
-  async signout(userId: number) {
+  async signout(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },
       data: { hashedRt: null },
@@ -162,18 +146,19 @@ export class AuthService {
 
   /**
    * JWT COMPOSITION ENGINE
+   * FIX: Using explicit string literal for expiresIn to satisfy Type Overloads.
    */
-  private async signTokens(userId: number, email: string, role: string, permissions: string[]) {
+  private async signTokens(userId: string, email: string, role: string, permissions: string[]) {
     const payload = { sub: userId, email, role, perms: permissions };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload, {
         secret: this.config.get<string>('AT_SECRET'),
-        expiresIn: '15m', // Short-lived Access Token
+        expiresIn: '15m', 
       }),
       this.jwt.signAsync(payload, {
         secret: this.config.get<string>('RT_SECRET'),
-        expiresIn: '7d', // Long-lived Refresh Token
+        expiresIn: '7d', 
       }),
     ]);
 
@@ -183,7 +168,7 @@ export class AuthService {
   /**
    * CRYPTOGRAPHIC PERSISTENCE
    */
-  private async updateHashedRt(userId: number, rawRt: string) {
+  private async updateHashedRt(userId: string, rawRt: string) {
     const hashedRt = await bcrypt.hash(rawRt, 10);
     await this.prisma.user.update({
       where: { id: userId },

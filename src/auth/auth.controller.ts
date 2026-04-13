@@ -20,14 +20,14 @@ import { SigninDto, SignupDto } from './dto';
 import { RtGuard } from './guards/rt.guard';
 
 /**
- * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) GATEWAY - v4.0
- * ------------------------------------------------------------------
+ * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) GATEWAY - v4.1 (MongoDB Optimized)
+ * ----------------------------------------------------------------------------
  * @author Radouane Djoudi
  * @project Zenith Secure Engine
  * * * CORE SECURITY PRINCIPLES:
  * 1. DEFENSE_IN_DEPTH: Layered validation (Throttling -> Guard -> Kernel Logic).
  * 2. RTR_ENFORCEMENT: Strictly controls the 'Burn-on-Use' rotation lifecycle.
- * 3. FORENSIC_TELEMETRY: Comprehensive logging for audit readiness.
+ * 3. MIGRATION_READY: Refactored for String-based BSON ObjectIDs.
  * 4. PERFORMANCE: Optimized RTT for stateless session audits.
  */
 @ApiTags('Identity & Access Management')
@@ -39,12 +39,9 @@ export class AuthController {
 
   /**
    * IDENTITY PROVISIONING (SIGNUP)
-   * ------------------------------
-   * Registers a new subject. Protected by restrictive throttling to prevent
-   * automated registry exhaustion.
    */
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // Anti-Spam: 5 requests per minute
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('signup')
   @ApiOperation({ summary: 'Identity Provisioning (Signup)' })
   @ApiResponse({ status: 201, description: 'Identity registry established successfully.' })
@@ -56,11 +53,9 @@ export class AuthController {
 
   /**
    * SESSION AUTHENTICATION (SIGNIN)
-   * -------------------------------
-   * Authenticates credentials and initializes the rotation cycle.
    */
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // Anti-Brute: 10 attempts per minute
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('signin')
   @ApiOperation({ summary: 'Session Authentication (Signin)' })
   @ApiResponse({ status: 200, description: 'Cryptographic identity tokens issued.' })
@@ -72,30 +67,25 @@ export class AuthController {
 
   /**
    * CRYPTOGRAPHIC TOKEN ROTATION (REFRESH)
-   * --------------------------------------
-   * Logic: Executes the 'Burn-on-Use' protocol.
-   * COMPLIANCE: Validates the RT signature and persisted rotation hash.
+   * REFINED: userId is handled as String to comply with MongoDB ObjectId format.
    */
   @Public()
   @UseGuards(RtGuard)
   @Post('refresh')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Cryptographic Token Rotation (Refresh)' })
-  @ApiResponse({ status: 200, description: 'Rotation cycle complete. New tokens issued.' })
-  @ApiResponse({ status: 403, description: 'SECURITY_BREACH: Potential token reuse detected.' })
   @HttpCode(HttpStatus.OK)
   async refresh(@Req() req: Request) {
-    const userId = Number(req.user?.['sub'] || req.user?.['id']);
+    // SECURITY: Extracting identity from the payload as String (Not Number)
+    const userId = String(req.user?.['sub'] || req.user?.['id']);
     const refreshToken = req.user?.['refreshToken'];
 
-    this.logger.log(`🔄 [AUTH_ROTATION] Executing RTR cycle for ID: ${userId}`);
+    this.logger.log(`🔄 [AUTH_ROTATION] Executing RTR cycle for Identity: ${userId}`);
     return await this.authService.refreshTokens(userId, refreshToken);
   }
 
   /**
    * SESSION TERMINATION (SIGNOUT)
-   * ------------------------------
-   * Atomic revocation of the persistent session hash.
    */
   @Public()
   @UseGuards(RtGuard)
@@ -104,15 +94,13 @@ export class AuthController {
   @ApiOperation({ summary: 'Session Termination (Signout)' })
   @HttpCode(HttpStatus.OK)
   async signout(@Req() req: Request) {
-    const userId = Number(req.user?.['sub'] || req.user?.['id']);
-    this.logger.log(`🚪 [AUTH_REVOKE] Invalidating session for ID: ${userId}`);
+    const userId = String(req.user?.['sub'] || req.user?.['id']);
+    this.logger.log(`🚪 [AUTH_REVOKE] Invalidating session for Identity: ${userId}`);
     return await this.authService.signout(userId);
   }
 
   /**
    * STATELESS SESSION AUDIT (STATUS)
-   * --------------------------------
-   * High-speed claim verification. Zero Database I/O.
    */
   @UseGuards(PermissionsGuard)
   @Permissions('AUTH_STATUS_VIEW')
@@ -121,8 +109,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Stateless Session Audit (Status)' })
   @HttpCode(HttpStatus.OK)
   async getStatus(@Req() req: Request) {
-    const userId = Number(req.user?.['sub'] || req.user?.['id']);
-    this.logger.log(`📡 [AUTH_AUDIT] Telemetry request | Identity ID: ${userId}`);
+    const userId = String(req.user?.['sub'] || req.user?.['id']);
+    this.logger.log(`📡 [AUTH_AUDIT] Telemetry request | Identity: ${userId}`);
 
     return {
       status: 'AUTHENTICATED_SECURE',

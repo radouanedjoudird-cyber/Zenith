@@ -11,14 +11,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto';
 
 /**
- * ZENITH IDENTITY SERVICE - CORE ENGINE v2.6
- * -----------------------------------------
+ * ZENITH IDENTITY SERVICE - CORE ENGINE v4.1 (MongoDB Edition)
+ * -----------------------------------------------------------
  * @author Radouane Djoudi
  * @project Zenith Secure Engine
  * * * ARCHITECTURE: High-Performance User Lifecycle (PBAC Ready).
- * * * SECURITY STRATEGY: 
- * 1. ZERO-LEAK_PROJECTION: Surgical attribute whitelisting via 'safeProfile'.
- * 2. ATOMIC_CONSISTENCY: Ensures profile synchronization is transactionally safe.
+ * * * REFINEMENTS:
+ * 1. MIGRATION: Shifted to String-based ObjectIDs for MongoDB local infra.
+ * 2. ZERO-LEAK_PROJECTION: Surgical attribute whitelisting via 'safeProfile'.
  * 3. HASH_ROTATION: Dynamic re-salting for password updates (Work Factor 12).
  */
 @Injectable()
@@ -47,9 +47,9 @@ export class UsersService {
 
   /**
    * FETCH AUTHENTICATED IDENTITY
-   * Surgical retrieval to minimize network RTT and memory footprint.
+   * @param userId MongoDB ObjectId (String)
    */
-  async getMe(userId: number) {
+  async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: this.safeProfile,
@@ -66,19 +66,14 @@ export class UsersService {
    * PARTIAL IDENTITY SYNCHRONIZATION
    * Handles conditional hashing for passwords and updates user metadata.
    */
-  async updateMe(userId: number, dto: UpdateUserDto) {
+  async updateMe(userId: string, dto: UpdateUserDto) {
     try {
       const { password, ...otherData } = dto;
       const dataToUpdate: Prisma.UserUpdateInput = { ...otherData };
 
-      /**
-       * CONDITIONAL CRYPTOGRAPHY:
-       * Only triggers bcrypt if a new password is provided in the DTO.
-       * Work Factor 12 selected for balance between security and performance.
-       */
       if (password) {
         dataToUpdate.password = await bcrypt.hash(password, 12);
-        this.logger.warn(`🔐 [SECURITY_EVENT] Password rotation triggered for ID: ${userId}`);
+        this.logger.warn(`🔐 [SECURITY_EVENT] Password rotation triggered for Identity: ${userId}`);
       }
 
       const updatedUser = await this.prisma.user.update({
@@ -87,7 +82,7 @@ export class UsersService {
         select: this.safeProfile,
       });
 
-      this.logger.log(`✅ [IDENTITY_SYNC] Profile synchronized for User: ${userId}`);
+      this.logger.log(`✅ [IDENTITY_SYNC] Profile synchronized for Identity: ${userId}`);
       return updatedUser;
 
     } catch (error) {
@@ -99,24 +94,23 @@ export class UsersService {
    * IDENTITY TERMINATION PROTOCOL
    * IRREVERSIBLE: Purges the user identity from the Zenith registry.
    */
-  async deleteMe(userId: number) {
+  async deleteMe(userId: string) {
     try {
-      // Logic: Atomic delete operation.
       await this.prisma.user.delete({ where: { id: userId } });
-      this.logger.warn(`💀 [IDENTITY_PURGE] Hard-delete executed for ID: ${userId}`);
+      this.logger.warn(`💀 [IDENTITY_PURGE] Hard-delete executed for Identity: ${userId}`);
       
       return { 
         status: 'SUCCESS', 
         message: 'Identity purged from Zenith Registry.' 
       };
     } catch (error) {
+      this.logger.error(`❌ [PURGE_FAILURE] Target not found for ID: ${userId}`);
       throw new NotFoundException('Zenith Security: Target identity not found.');
     }
   }
 
   /**
    * GLOBAL DIRECTORY ACCESS (GOVERNANCE)
-   * Returns all users sorted by creation date for administrative clarity.
    */
   async getAllUsers() {
     this.logger.debug('📊 [ADMIN_GOVERNANCE] Querying global registry.');
@@ -129,7 +123,7 @@ export class UsersService {
   /**
    * SURGICAL IDENTITY LOOKUP BY ID
    */
-  async getUserById(userId: number) {
+  async getUserById(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: this.safeProfile,
@@ -141,12 +135,9 @@ export class UsersService {
 
   /**
    * DATABASE EXCEPTION MITIGATION
-   * Standardizes raw Prisma errors into sanitized API responses 
-   * to prevent DB-Schema leaking.
    */
-  private handlePrismaError(error: any, userId: number) {
+  private handlePrismaError(error: any, userId: string) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      // P2002: Unique constraint violation (e.g. email already exists)
       if (error.code === 'P2002') {
         throw new ConflictException('Identity Conflict: Unique constraint violation (Email/Phone).');
       }
