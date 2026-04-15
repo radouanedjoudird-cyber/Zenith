@@ -1,8 +1,10 @@
 // -----------------------------------------------------------------------------
-// ZENITH CLOUD ARCHITECTURE - ADVANCED FORENSIC ENGINE v5.0
+// 🌐 ZENITH PERSISTENCE LAYER - CORE SCHEMA v5.3
 // -----------------------------------------------------------------------------
 // @author Radouane Djoudi
-// @project Zenith Secure Engine (Enterprise Edition)
+// @engine MongoDB with ReplicaSet Optimization
+// @status FINAL_REVISION_CLEAN
+// -----------------------------------------------------------------------------
 
 generator client {
   provider      = "prisma-client-js"
@@ -14,14 +16,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ==========================================
-// IDENTITY & SECURITY ENUMS
-// ==========================================
+// [1] SYSTEM ENUMERATIONS
+// -----------------------------------------------------------------------------
 enum Role {
-  USER
   ADMIN
-  MODERATOR
   SUPER_ADMIN
+  USER
+  MANAGER
 }
 
 enum LogStatus {
@@ -32,105 +33,90 @@ enum LogStatus {
 }
 
 enum Severity {
-  LOW      // INFO: Regular operations
-  MEDIUM   // WARN: Important changes
-  HIGH     // CRITICAL: Sensitive changes (Passwords, Roles)
-  CRITICAL // SECURITY_ALERT: Potential breach or system-wide changes
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }
 
-// ==========================================
-// USER CORE IDENTITY
-// ==========================================
-model User {
-  id           String           @id @default(auto()) @map("_id") @db.ObjectId
-  email        String           @unique
-  password     String
-  firstName    String
-  familyName   String
-  phoneNumber  String?          @unique
-  role         Role             @default(USER)
-  
-  sessions     Session[]        
-  permissions  UserPermission[]
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+// [2] IDENTITY MODELS
+// -----------------------------------------------------------------------------
+
+model user {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  email       String   @unique // Prisma automatically creates an index for @unique
+  password    String
+  firstName   String
+  familyName  String
+  phoneNumber String   @unique // Prisma automatically creates an index for @unique
+  role        Role     @default(USER)
+  createdAt   DateTime @default(now()) @db.Date
+  updatedAt   DateTime @updatedAt @db.Date
+
+  // Relation Hooks
+  permissions userPermission[]
+  sessions    session[]
 
   @@map("users")
   @@index([role])
+  // Removed @@index([email]) as it is redundant due to @unique
 }
 
-// ==========================================
-// SESSION REGISTRY (Multi-Device Management)
-// ==========================================
-model Session {
+model session {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  hashedRt  String   @unique
-  userAgent String?
-  ipAddress String?
   userId    String   @db.ObjectId
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  user      user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hashedRt  String   @unique
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now()) @db.Date
+  updatedAt DateTime @updatedAt @db.Date
 
-  @@index([userId])
   @@map("sessions")
+  @@index([userId])
 }
 
-// ==========================================
-// PERMISSION SYSTEM (PBAC)
-// ==========================================
-model UserPermission {
-  id      String @id @default(auto()) @map("_id") @db.ObjectId
-  action  String 
-  userId  String @db.ObjectId
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+// [3] FORENSIC & TELEMETRY MODELS
+// -----------------------------------------------------------------------------
 
-  @@unique([userId, action]) 
-  @@index([action])
-  @@map("user_permissions")
-}
+model auditLog {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  action    String
+  entity    String
+  entityId  String?   @db.ObjectId
+  userId    String?   @db.ObjectId
+  userEmail String?
+  ipAddress String?
+  userAgent String?
+  method    String?
+  path      String?
+  
+  // METADATA SNAPSHOTS
+  payload   Json?     
+  newData   Json?     
+  oldData   Json?     
 
-// ==========================================
-// ADVANCED FORENSIC AUDIT TRAIL
-// ==========================================
-/**
- * @model AuditLog
- * @description Advanced forensic record for full system traceability.
- * Features state snapshotting (Before/After) for critical data mutations.
- */
-model AuditLog {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  
-  // ACTION METADATA
-  action       String   // e.g., "USER_UPDATE", "LOGIN", "PASSWORD_CHANGE"
-  path         String?  // The API endpoint accessed
-  method       String?  // GET, POST, PATCH, DELETE
-  
-  // RESOURCE TRACING
-  entity       String   // e.g., "User", "Session"
-  entityId     String?  // The specific ID of the modified record
-  
-  // IDENTITY CONTEXT
-  userId       String?  @db.ObjectId
-  userEmail    String?  
-  
-  // PAYLOAD SNAPSHOTTING (The "Advanced" Logic)
-  payload      Json?    // The raw data sent by the user
-  previousData Json?    // State BEFORE mutation (for Forensics/Rollback)
-  newData      Json?    // State AFTER mutation
-  
-  // SECURITY TELEMETRY
-  ipAddress    String?
-  userAgent    String?
-  status       LogStatus @default(SUCCESS)
-  severity     Severity  @default(LOW)
-  
-  createdAt    DateTime @default(now())
+  status    LogStatus @default(SUCCESS)
+  severity  Severity  @default(LOW)
+  createdAt DateTime  @default(now()) @db.Date
 
   @@map("audit_logs")
   @@index([userId])
   @@index([action])
   @@index([severity])
   @@index([createdAt])
-  @@index([entity, entityId]) // Compound index for fast resource history lookup
+}
+
+// [4] GOVERNANCE MODELS
+// -----------------------------------------------------------------------------
+
+model userPermission {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @db.ObjectId
+  user   user   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action String
+
+  @@unique([userId, action])
+  @@map("user_permissions")
+  @@index([action])
 }

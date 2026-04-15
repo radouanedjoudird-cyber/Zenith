@@ -68,6 +68,10 @@ export class AuditInterceptor implements NestInterceptor {
     );
   }
 
+  /**
+   * @private @method persistLog
+   * @description High-integrity persistence for forensic telemetry data.
+   */
   private async persistLog(data: any) {
     const { context, method, path, user, ip, payload, responseData, latency, entityId, status, error } = data;
 
@@ -76,6 +80,10 @@ export class AuditInterceptor implements NestInterceptor {
       const sanitizedPayload = { ...payload };
       if (sanitizedPayload.password) sanitizedPayload.password = '[REDACTED]';
 
+      /**
+       * 🟢 FIX: Accessing 'auditLog' (singular) as defined in the new Prisma Schema.
+       * Ensuring entityId is handled as String or Null for MongoDB compatibility.
+       */
       await this.prisma.auditLog.create({
         data: {
           action: `${method}_${context.getHandler().name.toUpperCase()}`,
@@ -88,7 +96,7 @@ export class AuditInterceptor implements NestInterceptor {
           userEmail: user?.email || payload?.email || 'Anonymous',
           
           payload: sanitizedPayload,
-          // 🟢 Advanced Feature: Storing the resulting state
+          // 🟢 Advanced Feature: Storing the resulting state in the newly added fields
           newData: responseData ? this.sanitizeResponse(responseData) : (error ? { error } : null),
           
           ipAddress: ip === '::1' ? '127.0.0.1' : ip,
@@ -105,16 +113,19 @@ export class AuditInterceptor implements NestInterceptor {
 
   /**
    * SEVERITY MATRIX v5.0
+   * @description Categorizes events based on operational impact and performance thresholds.
    */
   private calculateSeverity(method: string, latency: number, status?: LogStatus): Severity {
+    // 🛡️ SECURITY LOGIC: Elevated severity for failures or suspicious activities
     if (status === LogStatus.FAILURE || status === LogStatus.SUSPICIOUS) return Severity.HIGH;
-    if (latency > 2000) return Severity.MEDIUM; // Performance warning
+    if (latency > 2000) return Severity.MEDIUM; // Performance warning threshold
     if (['DELETE', 'PATCH', 'POST'].includes(method)) return Severity.MEDIUM;
     return Severity.LOW;
   }
 
   /**
-   * SCRUBBER: Removes sensitive fields from response data before persistence
+   * SCRUBBER: Removes sensitive fields from response data before persistence.
+   * Ensures zero-leakage of hashed credentials or tokens.
    */
   private sanitizeResponse(data: any) {
     if (typeof data !== 'object' || data === null) return data;

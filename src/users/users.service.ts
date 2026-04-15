@@ -30,7 +30,6 @@ export class UsersService {
   /**
    * IDENTITY PROJECTION MATRIX: 
    * Strict whitelist of non-sensitive attributes for API responses.
-   * Ensures HashedRTs and Passwords never leave the persistence layer.
    */
   private readonly safeProfile = { 
     id: true, 
@@ -49,9 +48,6 @@ export class UsersService {
 
   /**
    * @method getMe
-   * @description Resolves the authenticated identity context.
-   * @param {string} userId - Unique Identity Identifier (MongoDB ObjectId).
-   * @returns {Promise<User>} Sanitized identity profile.
    */
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -69,19 +65,18 @@ export class UsersService {
   /**
    * @method updateMe
    * @description Performs partial identity synchronization with credential rotation.
-   * @param {string} userId - Identity Identifier.
-   * @param {UpdateUserDto} dto - Data Transfer Object for identity updates.
    */
   async updateMe(userId: string, dto: UpdateUserDto) {
     try {
       const { password, ...otherData } = dto;
-      const dataToUpdate: Prisma.UserUpdateInput = { ...otherData };
+      
+      /**
+       * 🟢 FIX: Changed Prisma.UserUpdateInput to Prisma.userUpdateInput (lowercase 'u')
+       * to align with the generated Prisma client types.
+       */
+      const dataToUpdate: Prisma.userUpdateInput = { ...otherData };
 
       if (password) {
-        /**
-         * @security_logic
-         * Re-hashing credentials using Argon2id with adaptive memory-hard parameters.
-         */
         dataToUpdate.password = await argon2.hash(password);
         this.logger.warn(`SECURITY_EVENT [CREDENTIAL_ROTATION]: Password hash upgraded for ${userId}`);
       }
@@ -102,8 +97,6 @@ export class UsersService {
 
   /**
    * @method deleteMe
-   * @description Identity Termination Protocol (ITP).
-   * Irreversibly purges the identity from the global registry.
    */
   async deleteMe(userId: string) {
     try {
@@ -122,7 +115,6 @@ export class UsersService {
 
   /**
    * @method getAllUsers
-   * @description Administrative directory access for governance and auditing.
    */
   async getAllUsers() {
     this.logger.debug('AUDIT_LOG [GOVERNANCE]: Querying global identity registry.');
@@ -134,7 +126,6 @@ export class UsersService {
 
   /**
    * @method getUserById
-   * @description Precision lookup for administrative identity inspection.
    */
   async getUserById(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -148,7 +139,6 @@ export class UsersService {
 
   /**
    * @private @method handlePrismaError
-   * @description Centralized exception mitigation engine.
    */
   private handlePrismaError(error: any, userId: string) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

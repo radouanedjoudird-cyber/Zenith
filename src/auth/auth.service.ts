@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, Role, Session } from '@prisma/client';
+import { Prisma, Role, session as sessionType } from '@prisma/client'; // FIX: Changed Session to session
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { SigninDto, SignupDto } from './dto';
@@ -115,10 +115,9 @@ export class AuthService {
     });
 
     /**
-     * 🟢 FIX TS2322: Explicitly typing the variable as Session | null.
-     * Prevents the compiler from inferring 'null' as the only possible type.
+     * 🟢 FIX TS2322: Explicitly typing the variable as session | null.
      */
-    let activeSession: Session | null = null;
+    let activeSession: sessionType | null = null; // Changed to match schema
 
     for (const session of userSessions) {
       const isMatch = await argon2.verify(session.hashedRt, rawRt);
@@ -130,7 +129,6 @@ export class AuthService {
 
     /**
      * 🛡️ REUSE DETECTION PROTOCOL
-     * If activeSession is still null after the loop, security compromise is suspected.
      */
     if (!activeSession) {
       await this.signoutAll(userId); 
@@ -146,7 +144,6 @@ export class AuthService {
 
     /**
      * 🟢 FIX TS18047: Identity Context Verification.
-     * Ensures the user still exists in the registry before accessing properties.
      */
     if (!user) {
       throw new ForbiddenException('ZENITH_GUARD: Identity context lost.');
@@ -158,7 +155,7 @@ export class AuthService {
     const newHashedRt = await argon2.hash(tokens.refresh_token);
 
     /**
-     * 🟢 FIX TS2339: Compiler now knows activeSession is NOT null due to the guard above.
+     * 🟢 FIX TS2339: activeSession is NOT null due to the guard above.
      */
     await this.prisma.session.update({
       where: { id: activeSession.id },
