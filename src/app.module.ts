@@ -10,46 +10,44 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
 /**
- * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v2.8
- * --------------------------------------------------
+ * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v5.0
+ * -----------------------------------------------------------------------------
  * @author Radouane Djoudi
- * @project Zenith Secure Engine
- * * * ARCHITECTURAL STRATEGY:
- * 1. SECURE_BY_DEFAULT: All routes require authentication unless marked @Public().
- * 2. DEFENSE_IN_DEPTH: Sequenced Guards (Throttling -> Auth -> Permissions).
- * 3. TELEMETRY_PIPELINE: Global interceptor for forensic state auditing.
- * 4. RESOURCE_QUOTA: Multi-tier rate limiting to prevent infrastructure exhaustion.
+ * @project Zenith Secure Engine (Enterprise Edition)
+ * * ARCHITECTURAL LAYERS:
+ * 1. INGRESS_SHIELD: Rate limiting & Anti-DoS orchestration.
+ * 2. IDENTITY_STRatum: Global JWT validation with RTR awareness.
+ * 3. PERMISSION_FABRIC: PBAC (Permissions-Based Access Control) enforcement.
+ * 4. OBSERVABILITY_PLANE: Advanced forensic auditing & telemetry.
  */
 @Module({
   imports: [
     /**
      * CONFIGURATION KERNEL:
-     * Manages environment variables with high-performance memory caching.
+     * High-performance environment orchestration with caching.
      */
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
+      expandVariables: true, // Allows using vars inside .env (e.g. DB_URL=${HOST}/...)
     }),
 
     /**
-     * RATE LIMITING ENGINE (ANTI-DOS):
-     * Implements dual-tier protection:
-     * - Standard: General API navigation.
-     * - Critical: High-sensitivity endpoints (Auth/Write).
+     * RATE LIMITING ENGINE (ADVANCED ANTI-DOS):
+     * Dual-tier protection strategy for distributed infrastructure.
      */
     ThrottlerModule.forRoot([{
-      name: 'standard',
-      ttl: 60000, 
-      limit: 100, 
+      name: 'standard_flow',
+      ttl: 60000,   // 1 minute
+      limit: 120,   // Increased for high-concurrency micro-frontends
     }, {
-      name: 'critical',
-      ttl: 60000,
-      limit: 5,   
+      name: 'critical_auth',
+      ttl: 60000,   // 1 minute
+      limit: 7,     // Strict limit for login/refresh attempts
     }]),
 
     /**
-     * INFRASTRUCTURE & DOMAIN MODULES:
-     * Encapsulates persistence layers and business logic.
+     * INFRASTRUCTURE & DOMAIN CORE:
      */
     PrismaModule,
     AuthModule,
@@ -57,8 +55,8 @@ import { UsersModule } from './users/users.module';
   ],
   providers: [
     /**
-     * LAYER 1: NETWORK GUARD (ThrottlerGuard)
-     * Responsibility: Prevents resource exhaustion and brute-force attempts.
+     * SHIELD 1: NETWORK RESILIENCE
+     * Prevents infrastructure exhaustion at the ingress point.
      */
     {
       provide: APP_GUARD,
@@ -66,8 +64,8 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * LAYER 2: AUTHENTICATION GUARD (AtGuard)
-     * Responsibility: Validates identity. Enforces mandatory JWT check globally.
+     * SHIELD 2: GLOBAL AUTHENTICATION (Zero-Trust)
+     * Enforces mandatory JWT verification across all endpoints.
      */
     {
       provide: APP_GUARD,
@@ -75,8 +73,8 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * LAYER 3: AUTHORIZATION GUARD (PermissionsGuard)
-     * Responsibility: Validates granular PBAC claims injected into req.user.
+     * SHIELD 3: GRANULAR PBAC AUTHORIZATION
+     * Validates domain-specific permissions before handler execution.
      */
     {
       provide: APP_GUARD,
@@ -84,8 +82,8 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * POST-EXECUTION: AUDIT INTERCEPTOR
-     * Responsibility: Captures successful/failed actions for security compliance.
+     * TELEMETRY: ADVANCED FORENSIC INTERCEPTOR
+     * Captures system-wide state changes and data snapshots for auditing.
      */
     {
       provide: APP_INTERCEPTOR,

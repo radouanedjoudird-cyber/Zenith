@@ -6,82 +6,108 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { LogStatus, Severity } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 
 /**
- * ZENITH PERMISSIONS GUARD - PBAC ENGINE v2.8
- * -------------------------------------------
- * MISSION: Standardize granular access control across the Zenith infrastructure.
- * STRATEGY: Permission-Based Access Control (PBAC).
- * * ARCHITECTURE PRINCIPLES:
- * 1. ZERO-DB POLICY: Validates permissions directly from the hydrated JWT context for ultra-fast RTT.
- * 2. HIERARCHICAL RESOLUTION: Intelligently merges permissions from both Handlers and Controllers.
- * 3. FORENSIC AUDITING: Real-time logging of access violations for security monitoring.
- * * @author Radouane Djoudi
- * @project Zenith Secure Engine
+ * ZENITH ADVANCED PERMISSIONS GUARD - PBAC ENGINE v5.0
+ * -----------------------------------------------------------------------------
+ * @author Radouane Djoudi
+ * @project Zenith Secure Engine (Enterprise Edition)
+ * STRATEGY: Permission-Based Access Control (PBAC) with Forensic Persistence.
  */
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  private readonly logger = new Logger('Zenith-Security-Guard');
+  private readonly logger = new Logger('ZENITH_SECURITY_GUARD');
 
-  constructor(private reflector: Reflector) {}
+  constructor(
+    private reflector: Reflector,
+    private prisma: PrismaService, // Injecting Prisma for Forensic Logging
+  ) {}
 
   /**
    * EXECUTION GATEKEEPING
    * ---------------------
-   * Determines if the request is authorized to proceed based on cryptographic PBAC claims.
+   * Validates cryptographic PBAC claims and records violations.
    */
-  canActivate(context: ExecutionContext): boolean {
-    /**
-     * REFLECTION LAYER:
-     * Extracts required permissions using 'getAllAndOverride' to ensure that
-     * method-level security definitions strictly take precedence over class-level ones.
-     */
-    const requiredPermissions = this.reflector.getAllAndOverride<string[]>('permissions', [
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const requiredPermissions = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    // BYPASS PROTOCOL: If no explicit permissions are defined, the path is considered 'Inherited Access'.
+    // BYPASS: Inherited Access if no permissions are defined.
     if (!requiredPermissions || requiredPermissions.length === 0) {
       return true;
     }
 
-    // EXTRACTION: Capturing identity and network metadata for the audit trail.
     const request = context.switchToHttp().getRequest();
     const { user, ip, method, url } = request;
+    const userAgent = request.get('user-agent') || 'Unknown Device';
 
     /**
-     * SECURITY SHIELD: IDENTITY INTEGRITY CHECK
-     * Critical failure if the user context was not hydrated by the preceding AuthGuard.
+     * SECURITY SHIELD: IDENTITY INTEGRITY
      */
     if (!user || !user.permissions) {
-      this.logger.error(
-        `🚨 [SECURITY_BREACH] Unauthorized access attempt to ${url} from IP: ${ip}. Identity context is NULL.`
-      );
-      throw new ForbiddenException('Zenith Shield: Identity context missing or corrupted.');
+      this.logger.error(`🚨 [SECURITY_BREACH] Identity context NULL for ${url} | Origin: ${ip}`);
+      throw new ForbiddenException('Zenith Shield: Identity context corrupted.');
     }
 
     /**
-     * CRYPTOGRAPHIC PBAC VALIDATION:
-     * Logic: Implements 'All-Or-Nothing' validation for required permission sets.
+     * PBAC VALIDATION: All-Or-Nothing Strategy
      */
     const hasPermission = requiredPermissions.every((perm) =>
       user.permissions.includes(perm),
     );
 
     if (!hasPermission) {
-      /**
-       * AUDIT LOGGING:
-       * Captures the specific failed permission to assist in security auditing and troubleshooting.
-       */
-      this.logger.warn(
-        `⚠️ [ACCESS_DENIED] User: ${user.email} | Required: [${requiredPermissions}] | Origin: ${ip} | Path: ${method} ${url}`
-      );
+      // 🛡️ TRIGGER FORENSIC ENGINE: Persistent Audit Logging
+      await this.handleSecurityViolation(user, method, url, ip, userAgent, requiredPermissions);
       
-      throw new ForbiddenException('Zenith Shield: Insufficient granular permissions for this operation.');
+      throw new ForbiddenException('Zenith Shield: Insufficient granular permissions.');
     }
 
-    // SUCCESS: Permission verified. Releasing request to the service layer.
     return true;
+  }
+
+  /**
+   * SECURITY VIOLATION PERSISTENCE (SOC VISIBILITY)
+   * ----------------------------------------------
+   * Compliant with Advanced Forensic Schema v5.0
+   */
+  private async handleSecurityViolation(
+    user: any, 
+    method: string, 
+    url: string, 
+    ip: string, 
+    userAgent: string, 
+    required: string[]
+  ) {
+    this.logger.warn(`⚠️ [ACCESS_DENIED] Identity ${user.email} attempted unauthorized access to ${url}`);
+
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          action: 'PERMISSION_DENIED',
+          entity: 'PermissionGuard',
+          path: url,
+          method: method,
+          userId: user.id,
+          userEmail: user.email,
+          ipAddress: ip === '::1' ? '127.0.0.1' : ip,
+          userAgent: userAgent,
+          status: LogStatus.DENIED, 
+          severity: Severity.HIGH,  // Automatic escalation for security violations
+          payload: {
+            required_permissions: required,
+            granted_permissions: user.permissions,
+            attempted_url: url
+          }
+        }
+      });
+    } catch (err) {
+      this.logger.error(`❌ [SOC_FAILURE] Failed to persist audit trail: ${err.message}`);
+    }
   }
 }

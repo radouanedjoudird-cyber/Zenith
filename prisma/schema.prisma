@@ -1,13 +1,8 @@
 // -----------------------------------------------------------------------------
-// ZENITH CLOUD ARCHITECTURE - MULTI-DEVICE IDENTITY REGISTRY v5.0
+// ZENITH CLOUD ARCHITECTURE - ADVANCED FORENSIC ENGINE v5.0
 // -----------------------------------------------------------------------------
 // @author Radouane Djoudi
 // @project Zenith Secure Engine (Enterprise Edition)
-// REFINEMENTS v5.0:
-// 1. SESSION_ISOLATION: Migrated 'hashedRt' to a dedicated 'Session' model.
-// 2. CRYPTO_COMPLIANCE: Fully optimized for Argon2id hash storage.
-// 3. MULTI_DEVICE: Enabled concurrent sessions with independent rotation cycles.
-// 4. SECURITY_ORCHESTRATION: Integrated Device/IP telemetry for audit tracing.
 
 generator client {
   provider      = "prisma-client-js"
@@ -20,7 +15,7 @@ datasource db {
 }
 
 // ==========================================
-// IDENTITY ENUMS
+// IDENTITY & SECURITY ENUMS
 // ==========================================
 enum Role {
   USER
@@ -29,11 +24,18 @@ enum Role {
   SUPER_ADMIN
 }
 
-enum LogSeverity {
-  INFO
-  WARN
-  CRITICAL
-  SECURITY_ALERT
+enum LogStatus {
+  SUCCESS
+  FAILURE
+  DENIED
+  SUSPICIOUS
+}
+
+enum Severity {
+  LOW      // INFO: Regular operations
+  MEDIUM   // WARN: Important changes
+  HIGH     // CRITICAL: Sensitive changes (Passwords, Roles)
+  CRITICAL // SECURITY_ALERT: Potential breach or system-wide changes
 }
 
 // ==========================================
@@ -48,12 +50,7 @@ model User {
   phoneNumber  String?          @unique
   role         Role             @default(USER)
   
-  /**
-   * ZENITH SESSIONS REGISTRY:
-   * Array of active cryptographic contexts across multiple devices.
-   */
   sessions     Session[]        
-  
   permissions  UserPermission[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
@@ -65,28 +62,13 @@ model User {
 // ==========================================
 // SESSION REGISTRY (Multi-Device Management)
 // ==========================================
-/**
- * @model Session
- * @description Manages active identity contexts for concurrent devices.
- * Implements granular Refresh Token Rotation (RTR) per device.
- */
 model Session {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  
-  /**
-   * HIGH-ENTROPY HASH: 
-   * Argon2id hash of the device-specific Refresh Token.
-   */
   hashedRt  String   @unique
-  
-  // DEVICE TELEMETRY: Forensic metadata for session identification.
-  userAgent String?  // e.g., "Mozilla/5.0 (iPhone; CPU iPhone OS 17...)"
-  ipAddress String?  // Client origin IP
-  
-  // RELATION: Linked to the master identity.
+  userAgent String?
+  ipAddress String?
   userId    String   @db.ObjectId
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -100,7 +82,6 @@ model Session {
 model UserPermission {
   id      String @id @default(auto()) @map("_id") @db.ObjectId
   action  String 
-  
   userId  String @db.ObjectId
   user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -110,28 +91,46 @@ model UserPermission {
 }
 
 // ==========================================
-// FORENSIC AUDIT TRAIL
+// ADVANCED FORENSIC AUDIT TRAIL
 // ==========================================
+/**
+ * @model AuditLog
+ * @description Advanced forensic record for full system traceability.
+ * Features state snapshotting (Before/After) for critical data mutations.
+ */
 model AuditLog {
-  id         String      @id @default(auto()) @map("_id") @db.ObjectId
-  action     String      
-  entity     String?     
-  entityId   String?     
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
   
-  userId     String?     @db.ObjectId
-  userEmail  String?     
-  ipAddress  String?     
-  userAgent  String?     
-  details    Json?       
+  // ACTION METADATA
+  action       String   // e.g., "USER_UPDATE", "LOGIN", "PASSWORD_CHANGE"
+  path         String?  // The API endpoint accessed
+  method       String?  // GET, POST, PATCH, DELETE
   
-  severity   LogSeverity @default(INFO) 
-  status     String      @default("SUCCESS") 
-  createdAt  DateTime    @default(now())
+  // RESOURCE TRACING
+  entity       String   // e.g., "User", "Session"
+  entityId     String?  // The specific ID of the modified record
+  
+  // IDENTITY CONTEXT
+  userId       String?  @db.ObjectId
+  userEmail    String?  
+  
+  // PAYLOAD SNAPSHOTTING (The "Advanced" Logic)
+  payload      Json?    // The raw data sent by the user
+  previousData Json?    // State BEFORE mutation (for Forensics/Rollback)
+  newData      Json?    // State AFTER mutation
+  
+  // SECURITY TELEMETRY
+  ipAddress    String?
+  userAgent    String?
+  status       LogStatus @default(SUCCESS)
+  severity     Severity  @default(LOW)
+  
+  createdAt    DateTime @default(now())
 
   @@map("audit_logs")
-
   @@index([userId])
   @@index([action])
   @@index([severity])
-  @@index([createdAt]) 
+  @@index([createdAt])
+  @@index([entity, entityId]) // Compound index for fast resource history lookup
 }

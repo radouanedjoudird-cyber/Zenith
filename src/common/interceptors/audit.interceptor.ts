@@ -5,123 +5,122 @@ import {
   Logger,
   NestInterceptor,
 } from '@nestjs/common';
-import { LogSeverity } from '@prisma/client'; // Import the new Enum
-import * as os from 'os';
+import { LogStatus, Severity } from '@prisma/client';
 import { tap } from 'rxjs/operators';
 import { PrismaService } from '../../prisma/prisma.service';
 
-const UAParser = require('ua-parser-js');
-
 /**
- * ZENITH FORENSIC ENGINE - TELEMETRY INTERCEPTOR v2.3
- * ---------------------------------------------------
- * STRATEGY: 
- * 1. ZERO-BLOCKING: Fire-and-forget database persistence for logs.
- * 2. HARDWARE OBSERVABILITY: Real-time HP-ProBook resource monitoring.
- * 3. ANOMALY DETECTION: Latency-based severity escalation.
- * 4. PII PROTECTION: Metadata capture without sensitive payload leaks.
- * * @author Radouane Djoudi
+ * ZENITH ADVANCED FORENSIC ENGINE - TELEMETRY v5.0
+ * -----------------------------------------------------------------------------
+ * @author Radouane Djoudi
+ * @description Global interceptor for high-fidelity audit trail orchestration.
+ * FEATURES:
+ * 1. STATE_SNAPSHOT: Captures request payload and response metadata.
+ * 2. PERFORMANCE_METRICS: Precise latency tracking.
+ * 3. IDENTITY_CONTEXT: Seamless user and entity identification.
  */
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
-  private readonly logger = new Logger('Zenith-Forensic-Engine');
+  private readonly logger = new Logger('ZENITH_FORENSIC_ENGINE');
 
   constructor(private prisma: PrismaService) {}
 
   intercept(context: ExecutionContext, next: CallHandler) {
     const request = context.switchToHttp().getRequest();
-    const { method, url, user, ip, body } = request;
+    const { method, url, user, ip, body, params } = request;
     const startTime = Date.now();
-    
-    // DEVICE FINGERPRINTING: Parsing User-Agent for detailed forensic auditing.
-    const ua = new UAParser(request.get('user-agent')).getResult();
 
     return next.handle().pipe(
       tap({
         next: async (responseData) => {
-          const latencyInMs = Date.now() - startTime;
+          const latency = Date.now() - startTime;
           
-          /**
-           * TELEMETRY GATHERING:
-           * Non-blocking resource calculation.
-           */
-          const totalMem = os.totalmem();
-          const freeMem = os.freemem();
-          const ramUsage = `${((1 - freeMem / totalMem) * 100).toFixed(2)}%`;
-          const cpuLoad = os.loadavg()[0].toFixed(2);
+          // Determine the targeted entity ID (e.g., from /users/:id)
+          const entityId = params?.id || responseData?.id || null;
 
-          // ASYNC LOGGING: Using fire-and-forget to maintain high RTT performance.
-          this.persistLog(
-            context, method, url, user, ip, body, responseData, 
-            latencyInMs, ramUsage, cpuLoad, ua
-          );
+          await this.persistLog({
+            context,
+            method,
+            path: url,
+            user,
+            ip,
+            payload: body,
+            responseData,
+            latency,
+            entityId,
+          });
+        },
+        error: async (err) => {
+          // Capturing Failed Attempts for Security Auditing
+          await this.persistLog({
+            context,
+            method,
+            path: url,
+            user,
+            ip,
+            payload: body,
+            status: LogStatus.FAILURE,
+            latency: Date.now() - startTime,
+            error: err.message,
+          });
         },
       }),
     );
   }
 
-  /**
-   * PERSISTENCE LOGIC:
-   * Decoupled method for cleaner execution and error handling.
-   */
-  private async persistLog(
-    context: ExecutionContext, method: string, url: string, user: any, 
-    ip: string, body: any, responseData: any, latencyInMs: number,
-    ramUsage: string, cpuLoad: string, ua: any
-  ) {
+  private async persistLog(data: any) {
+    const { context, method, path, user, ip, payload, responseData, latency, entityId, status, error } = data;
+
     try {
+      // 🛡️ SECURITY FILTER: Scrub sensitive data before logging
+      const sanitizedPayload = { ...payload };
+      if (sanitizedPayload.password) sanitizedPayload.password = '[REDACTED]';
+
       await this.prisma.auditLog.create({
         data: {
-          action: `${method} ${context.getHandler().name}`,
-          entity: context.getClass().name,
-          userId: user?.id || responseData?.id || null,
-          userEmail: user?.email || body?.email || responseData?.email || 'System/Anonymous',
-          ipAddress: ip === '::1' ? '127.0.0.1' : ip,
-          userAgent: `${ua.browser.name || 'Unknown'} on ${ua.os.name || 'Unknown'}`,
-          status: 'SUCCESS',
-          // Performance Tuning: Using our improved severity matrix
-          severity: this.calculateSeverity(method, url, latencyInMs),
+          action: `${method}_${context.getHandler().name.toUpperCase()}`,
+          path,
+          method,
+          entity: context.getClass().name.replace('Controller', ''),
+          entityId: entityId ? String(entityId) : null,
           
-          details: {
-            performance: { 
-              latency: `${latencyInMs}ms`, 
-              server_cpu: `${cpuLoad}%`, 
-              server_ram: ramUsage,
-              process_id: process.pid 
-            },
-            fingerprint: { 
-              arch: ua.cpu.architecture, 
-              os_ver: ua.os.version, 
-              device: ua.device.model || 'Workstation',
-            },
-            context: {
-              path: url,
-              controller: context.getClass().name,
-              handler: context.getHandler().name,
-            }
-          },
+          userId: user?.id || null,
+          userEmail: user?.email || payload?.email || 'Anonymous',
+          
+          payload: sanitizedPayload,
+          // 🟢 Advanced Feature: Storing the resulting state
+          newData: responseData ? this.sanitizeResponse(responseData) : (error ? { error } : null),
+          
+          ipAddress: ip === '::1' ? '127.0.0.1' : ip,
+          userAgent: context.switchToHttp().getRequest().get('user-agent'),
+          
+          status: status || LogStatus.SUCCESS,
+          severity: this.calculateSeverity(method, latency, status),
         },
       });
     } catch (err) {
-      this.logger.error(`❌ [FORENSIC FAILURE] Audit Trail persistence failed: ${err.message}`);
+      this.logger.error(`❌ [FORENSIC FAILURE] Could not persist audit trail: ${err.message}`);
     }
   }
 
   /**
-   * ADVANCED SEVERITY MATRIX:
-   * Maps strictly to the LogSeverity Enum defined in schema.prisma.
+   * SEVERITY MATRIX v5.0
    */
-  private calculateSeverity(method: string, url: string, latency: number): LogSeverity {
-    // 1. ANOMALY DETECTED: Latency > 1.5s is a critical performance issue.
-    if (latency > 1500) return LogSeverity.CRITICAL;
+  private calculateSeverity(method: string, latency: number, status?: LogStatus): Severity {
+    if (status === LogStatus.FAILURE || status === LogStatus.SUSPICIOUS) return Severity.HIGH;
+    if (latency > 2000) return Severity.MEDIUM; // Performance warning
+    if (['DELETE', 'PATCH', 'POST'].includes(method)) return Severity.MEDIUM;
+    return Severity.LOW;
+  }
 
-    // 2. DESTRUCTIVE ACTIONS: Hard-coded security rule.
-    if (method === 'DELETE' || url.includes('/admin/config')) return LogSeverity.SECURITY_ALERT;
-
-    // 3. STATE CHANGES: Moderate monitoring.
-    if (['PATCH', 'PUT', 'POST'].includes(method)) return LogSeverity.WARN;
-
-    // 4. STANDARD FLOW.
-    return LogSeverity.INFO;
+  /**
+   * SCRUBBER: Removes sensitive fields from response data before persistence
+   */
+  private sanitizeResponse(data: any) {
+    if (typeof data !== 'object' || data === null) return data;
+    const clean = { ...data };
+    delete clean.password;
+    delete clean.hashedRt;
+    return clean;
   }
 }

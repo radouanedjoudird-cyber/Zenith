@@ -7,23 +7,20 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { LogStatus, Severity } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 
 /**
- * ZENITH ADVANCED AUTHORIZATION GUARD (ENTERPRISE PBAC v2.2)
- * ---------------------------------------------------------
+ * ZENITH ADVANCED AUTHORIZATION GUARD (ENTERPRISE PBAC v5.0)
+ * -----------------------------------------------------------------------------
+ * @author Radouane Djoudi
+ * @project Zenith Secure Engine (Enterprise Edition)
  * MISSION: Enforce Permission-Based Access Control & Detect Privilege Escalation.
- * * * SECURITY LOGIC:
- * 1. GRANULARITY: Checks for specific actions (e.g., 'USER_DELETE') rather than just roles.
- * 2. SUPER-USER BYPASS: SUPER_ADMIN bypasses all checks for emergency operations.
- * 3. FORENSIC AUDITING: Async logging of unauthorized attempts into Neon DB.
- * 4. PERFORMANCE: Uses selective DB inclusion to minimize RTT.
- * * * @author Radouane Djoudi
  */
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  private readonly logger = new Logger('Zenith-Security-Guard');
+  private readonly logger = new Logger('ZENITH_SECURITY_GUARD');
 
   constructor(
     private reflector: Reflector,
@@ -31,66 +28,42 @@ export class PermissionsGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    /**
-     * METADATA EXTRACTION:
-     * Extracts required permissions assigned via @Permissions() decorator.
-     */
     const requiredPermissions = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    // PUBLIC ROUTE: If no permissions are specified, allow access (assuming AuthGuard passed).
-    if (!requiredPermissions) {
-      return true;
-    }
+    if (!requiredPermissions) return true;
 
     const request = context.switchToHttp().getRequest();
     const { user, method, url, ip } = request;
     const userAgent = request.get('user-agent') || 'Unknown Device';
 
-    // FAIL-SAFE: Verify identity presence (Prevents Guard misconfiguration issues).
     if (!user || !user.id) {
       this.logger.error(`[CRITICAL] Security Bypass Attempt: Missing identity at ${url}`);
       throw new UnauthorizedException('Zenith Identity: Session context missing.');
     }
 
-    /**
-     * STRATEGY: SUPER_ADMIN BYPASS
-     * For rapid infrastructure management, SUPER_ADMIN ignores granular checks.
-     */
-    if (user.role === 'SUPER_ADMIN') {
-      return true;
-    }
+    // STRATEGY: SUPER_ADMIN BYPASS
+    if (user.role === 'SUPER_ADMIN') return true;
 
-    /**
-     * DATABASE VERIFICATION:
-     * Fetching specific user permissions from the junction table.
-     * PERFORMANCE: Only selecting the 'action' field to reduce payload size.
-     */
+    // DATABASE VERIFICATION: Fetching permissions (Optimized RTT)
     const userWithPermissions = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: {
-        permissions: {
-          select: { action: true },
-        },
+        permissions: { select: { action: true } },
       },
     });
 
     const userActions = userWithPermissions?.permissions.map(p => p.action) || [];
-
-    /**
-     * PERMISSION EVALUATION:
-     * Every required permission must be present in the user's granted actions.
-     */
     const hasPermission = requiredPermissions.every((perm) => userActions.includes(perm));
 
     if (!hasPermission) {
-      // FORWARD TO FORENSIC ENGINE: Non-blocking audit trail persistence.
-      this.handleSecurityViolation(user, method, url, ip, userAgent, requiredPermissions);
+      // 🛡️ FORENSIC ENGINE: Detailed violation logging compliant with v5.0 Schema
+      await this.handleSecurityViolation(user, method, url, ip, userAgent, requiredPermissions);
       
       throw new ForbiddenException(
-        `Zenith Security: Access Denied. Required Permission: [${requiredPermissions.join(', ')}]`,
+        `Zenith Security: Access Denied. Insufficient clearance for [${requiredPermissions.join(', ')}]`,
       );
     }
 
@@ -100,6 +73,7 @@ export class PermissionsGuard implements CanActivate {
   /**
    * INTERNAL FORENSIC AUDIT:
    * Records security violations for threat hunting and SOC visibility.
+   * FIX: Removed 'details' and updated to 'payload', 'status', and 'severity' Enums.
    */
   private async handleSecurityViolation(
     user: any, 
@@ -115,17 +89,18 @@ export class PermissionsGuard implements CanActivate {
       await this.prisma.auditLog.create({
         data: {
           action: 'PERMISSION_DENIED',
-          severity: 'CRITICAL',
-          status: 'FAILURE',
-          userEmail: user?.email,
+          entity: 'RoleGuard',
+          path: url,
+          method: method,
           userId: user?.id,
-          ipAddress: ip,
+          userEmail: user?.email,
+          ipAddress: ip === '::1' ? '127.0.0.1' : ip,
           userAgent: userAgent,
-          details: {
-            attemptedUrl: url,
-            attemptedMethod: method,
-            missingPermissions: requiredPermissions,
-            timestamp: new Date().toISOString(),
+          status: LogStatus.DENIED,
+          severity: Severity.HIGH,
+          payload: {
+            missing_permissions: requiredPermissions,
+            context: 'Access denied by RolesGuard'
           },
         },
       });
