@@ -7,25 +7,24 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, Role } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { Prisma, Role, Session } from '@prisma/client';
+import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { SigninDto, SignupDto } from './dto';
 
 /**
- * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) - KERNEL v4.1 (MongoDB Edition)
- * -------------------------------------------------------------------------
- * @author Radouane Djoudi
- * @project Zenith Secure Engine
- * * CORE SECURITY IMPLEMENTATIONS:
- * 1. MIGRATION: Upgraded to String-based ObjectIDs for MongoDB compatibility.
- * 2. RTR (Refresh Token Rotation): Enforces single-use session integrity.
- * 3. CONSTANT_TIME_VERIFICATION: Guards against side-channel timing analysis.
- * 4. PBAC: Fine-grained permission mapping for distributed IoT ecosystems.
+ * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) - ENTERPRISE KERNEL v5.1
+ * -----------------------------------------------------------------------------
+ * @class AuthService
+ * @description Multi-device session orchestration with cross-device reuse detection.
+ * * * ARCHITECTURAL STANDARDS:
+ * 1. TYPE_SAFETY: Strict null checking and explicit interface enforcement.
+ * 2. NUCLEAR_RECOIL: Global session revocation on single-token reuse detection.
+ * 3. CRYPTOGRAPHY: Argon2id adaptive hashing (PHC Winner).
  */
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger('Zenith-Auth-Engine');
+  private readonly logger = new Logger('ZENITH_AUTH_CORE');
 
   constructor(
     private prisma: PrismaService,
@@ -34,11 +33,12 @@ export class AuthService {
   ) {}
 
   /**
-   * IDENTITY PROVISIONING (SIGNUP)
+   * @method signup
+   * @description Provisions a new identity and initializes the primary device session.
    */
   async signup(dto: SignupDto) {
     try {
-      const hashedPassword = await bcrypt.hash(dto.password, 12);
+      const hashedPassword = await argon2.hash(dto.password);
 
       const newUser = await this.prisma.user.create({
         data: {
@@ -61,24 +61,25 @@ export class AuthService {
         select: { id: true, email: true, role: true, permissions: { select: { action: true } } },
       });
 
-      this.logger.log(`✅ [AUTH_REGISTRY] Identity secured: ${newUser.email}`);
+      this.logger.log(`AUDIT [IDENTITY_PROVISIONED]: User ID: ${newUser.id}`);
 
       const permissions = newUser.permissions.map(p => p.action);
       const tokens = await this.signTokens(newUser.id, newUser.email, newUser.role, permissions);
 
-      await this.updateHashedRt(newUser.id, tokens.refresh_token);
+      await this.createSession(newUser.id, tokens.refresh_token);
       return tokens;
+
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Zenith Security: Identity collision detected in registry.');
+        throw new ConflictException('ZENITH_IAM: Registry collision detected.');
       }
-      this.logger.error(`❌ [KERNEL_CRASH] Signup failure: ${error.message}`);
       throw error;
     }
   }
 
   /**
-   * SESSION AUTHENTICATION (SIGNIN)
+   * @method signin
+   * @description Authenticates credentials and appends a new session.
    */
   async signin(dto: SigninDto) {
     const user = await this.prisma.user.findUnique({
@@ -86,67 +87,128 @@ export class AuthService {
       select: { id: true, email: true, password: true, role: true, permissions: { select: { action: true } } },
     });
 
-    const dummyHash = '$2b$12$L8v4Y0U6U7S8T9V0W1X2Y3Z4A5B6C7D8E9F0G1H2I3J4K5L6M7N8O';
-    const isPasswordValid = await bcrypt.compare(dto.password, user?.password || dummyHash);
+    const dummyHash = '$argon2id$v=19$m=65536,t=3,p=4$66YmZp...'; 
+    const isPasswordValid = user 
+      ? await argon2.verify(user.password, dto.password)
+      : await argon2.verify(dummyHash, dto.password);
 
     if (!user || !isPasswordValid) {
-      this.logger.warn(`⚠️ [AUTH_ALERT] Intrusion attempt detected on: ${dto.email}`);
-      throw new UnauthorizedException('Zenith Guard: Authentication failed.');
+      this.logger.warn(`SECURITY_ALERT [SIGNIN_ATTEMPT]: Unauthorized target: ${dto.email}`);
+      throw new UnauthorizedException('ZENITH_GUARD: Invalid credentials.');
     }
 
     const permissions = user.permissions.map(p => p.action);
     const tokens = await this.signTokens(user.id, user.email, user.role, permissions);
 
-    await this.updateHashedRt(user.id, tokens.refresh_token);
+    await this.createSession(user.id, tokens.refresh_token);
     return tokens;
   }
 
   /**
-   * REFRESH TOKEN ROTATION (RTR)
+   * @method refreshTokens
+   * @description RTR with Multi-Device Reuse Detection.
+   * FIXES: Resolved TS2322 (Type 'null'), TS18047 (Possibly null), and TS2339 (Property 'id').
    */
   async refreshTokens(userId: string, rawRt: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, hashedRt: true, email: true, role: true, permissions: { select: { action: true } } },
+    const userSessions = await this.prisma.session.findMany({
+      where: { userId },
     });
 
-    if (!user || !user.hashedRt) {
-      this.logger.warn(`🚨 [AUTH_REFUSED] Access to revoked session | ID: ${userId}`);
-      throw new ForbiddenException('Zenith Guard: Session invalid or expired.');
+    /**
+     * 🟢 FIX TS2322: Explicitly typing the variable as Session | null.
+     * Prevents the compiler from inferring 'null' as the only possible type.
+     */
+    let activeSession: Session | null = null;
+
+    for (const session of userSessions) {
+      const isMatch = await argon2.verify(session.hashedRt, rawRt);
+      if (isMatch) {
+        activeSession = session;
+        break;
+      }
     }
 
-    const isRtValid = await bcrypt.compare(rawRt, user.hashedRt);
+    /**
+     * 🛡️ REUSE DETECTION PROTOCOL
+     * If activeSession is still null after the loop, security compromise is suspected.
+     */
+    if (!activeSession) {
+      await this.signoutAll(userId); 
+      this.logger.error(`CRITICAL_ALERT [TOKEN_REUSE_DETECTED]: Potential breach for ID ${userId}.`);
+      throw new ForbiddenException('ZENITH_SHIELD: Security anomaly detected. Global lockout engaged.');
+    }
 
-    if (!isRtValid) {
-      await this.signout(userId);
-      this.logger.error(`🚨 [CRITICAL_SECURITY] Token Reuse Detected! | ID: ${userId} | ACTION: LOCKOUT`);
-      throw new ForbiddenException('Zenith Shield: Security breach detected. All sessions revoked.');
+    // Provision new tokens
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, role: true, permissions: { select: { action: true } } },
+    });
+
+    /**
+     * 🟢 FIX TS18047: Identity Context Verification.
+     * Ensures the user still exists in the registry before accessing properties.
+     */
+    if (!user) {
+      throw new ForbiddenException('ZENITH_GUARD: Identity context lost.');
     }
 
     const permissions = user.permissions.map(p => p.action);
-    const tokens = await this.signTokens(user.id, user.email, user.role, permissions);
+    const tokens = await this.signTokens(userId, user.email, user.role, permissions);
 
-    await this.updateHashedRt(user.id, tokens.refresh_token);
+    const newHashedRt = await argon2.hash(tokens.refresh_token);
 
-    this.logger.log(`🔄 [AUTH_ROTATION] Session rotated for ID: ${userId}`);
+    /**
+     * 🟢 FIX TS2339: Compiler now knows activeSession is NOT null due to the guard above.
+     */
+    await this.prisma.session.update({
+      where: { id: activeSession.id },
+      data: { hashedRt: newHashedRt },
+    });
+
     return tokens;
   }
 
   /**
-   * SESSION TERMINATION (SIGNOUT)
+   * @method signout
    */
-  async signout(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { hashedRt: null },
-    });
-    this.logger.log(`🚪 [AUTH_SESSION] Token invalidated for ID: ${userId}`);
-    return { status: 'SUCCESS', message: 'Identity decoupled.' };
+  async signout(userId: string, rawRt: string) {
+    const sessions = await this.prisma.session.findMany({ where: { userId } });
+    
+    for (const session of sessions) {
+      if (await argon2.verify(session.hashedRt, rawRt)) {
+        await this.prisma.session.delete({ where: { id: session.id } });
+        break;
+      }
+    }
+
+    this.logger.log(`AUDIT [SESSION_DECOUPLED]: Single device logout for ${userId}`);
+    return { status: 'OK', message: 'Specific session invalidated.' };
   }
 
   /**
-   * JWT COMPOSITION ENGINE
-   * FIX: Using explicit string literal for expiresIn to satisfy Type Overloads.
+   * @method signoutAll
+   */
+  async signoutAll(userId: string) {
+    await this.prisma.session.deleteMany({ where: { userId } });
+    this.logger.warn(`AUDIT [GLOBAL_LOGOUT]: All sessions purged for Identity ${userId}`);
+    return { status: 'OK', message: 'All active sessions invalidated.' };
+  }
+
+  /**
+   * @private @method createSession
+   */
+  private async createSession(userId: string, rawRt: string) {
+    const hashedRt = await argon2.hash(rawRt);
+    await this.prisma.session.create({
+      data: {
+        userId,
+        hashedRt,
+      },
+    });
+  }
+
+  /**
+   * @private @method signTokens
    */
   private async signTokens(userId: string, email: string, role: string, permissions: string[]) {
     const payload = { sub: userId, email, role, perms: permissions };
@@ -163,16 +225,5 @@ export class AuthService {
     ]);
 
     return { access_token: accessToken, refresh_token: refreshToken };
-  }
-
-  /**
-   * CRYPTOGRAPHIC PERSISTENCE
-   */
-  private async updateHashedRt(userId: string, rawRt: string) {
-    const hashedRt = await bcrypt.hash(rawRt, 10);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { hashedRt },
-    });
   }
 }

@@ -8,67 +8,76 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 
 /**
- * ZENITH REFRESH GUARD (RtGuard) - SECURITY KERNEL v4.0
- * ------------------------------------------------------------------
- * @author Radouane Djoudi
+ * ZENITH IDENTITY GATEWAY - REFRESH CONTEXT GUARD v5.0
+ * -----------------------------------------------------------------------------
+ * @class RtGuard
+ * @description Primary security interceptor for the Refresh Token Rotation (RTR) lifecycle.
+ * This guard ensures that only cryptographically valid Refresh Tokens reach the 
+ * multi-device session orchestration layer.
+ * * * ARCHITECTURAL STANDARDS:
+ * 1. DEFENSE_IN_DEPTH: Acts as the first layer of the dual-verification protocol.
+ * 2. EXCEPTION_MAPPING: Standardizes security rejections for consistent UI/UX state control.
+ * 3. FORENSIC_TELEMETRY: Provides high-fidelity logging for SIEM and security auditing.
+ * 4. MULTI_DEVICE_AWARE: Optimized for concurrent session validation.
+ * * @author Radouane Djoudi
  * @project Zenith Secure Engine
- * * * ARCHITECTURAL ROLE:
- * Acts as the primary interceptor for the Refresh Token Rotation (RTR) cycle.
- * Bridges Passport's cryptographic validation with Service-level 'Reuse Detection'.
- * * * SECURITY COMPLIANCE:
- * 1. FALLTHROUGH_PROTECTION: Ensures no unauthorized ingress to the refresh controller.
- * 2. AUDIT_TRAIL: Logs rejections with IP and forensic metadata for SIEM analysis.
- * 3. EXCEPTION_SHIELDING: Strategically maps 401/403 responses for client-side state control.
  */
 @Injectable()
 export class RtGuard extends AuthGuard('jwt-refresh') {
-  private readonly logger = new Logger('Zenith-RT-Guard');
+  private readonly logger = new Logger('ZENITH_RT_GUARD');
 
   /**
-   * HANDLE_REQUEST INTERCEPTOR:
-   * Overrides the default behavior to provide granular lifecycle control.
-   * Maps cryptographic failures to specific, actionable security exceptions.
+   * @method handleRequest
+   * @description Intercepts and refines the outcome of the Passport strategy validation.
+   * Maps low-level JWT errors into Zenith-standard business exceptions.
+   * * @param err - Internal Passport error
+   * @param user - Identity payload (hydrated by RtStrategy)
+   * @param info - Cryptographic metadata (e.g., expiration details)
+   * @param context - Execution context for HTTP metadata extraction
+   * * @returns {any} The validated identity payload including the raw RT.
+   * @throws {ForbiddenException | UnauthorizedException} Based on the failure vector.
    */
   handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-    // [PHASE 1] ATOMIC VALIDATION: Check for strategy errors or missing identity payload
+    // [PHASE 1] INGRESS VALIDATION
+    // Check for underlying strategy errors or complete absence of identity payload.
     if (err || !user) {
       const request = context.switchToHttp().getRequest();
       const ip = request.ip || request.headers['x-forwarded-for'] || '0.0.0.0';
+      const userAgent = request.headers['user-agent'] || 'UNKNOWN_AGENT';
 
       /**
-       * FORENSIC LOGGING:
-       * Capturing the precise failure vector (Expired, Malformed, Missing)
-       * for internal engine telemetry on the HP-ProBook logs.
+       * SECURITY TELEMETRY:
+       * Capturing precise failure vectors for real-time threat detection.
        */
       const failureReason = info?.message || (err ? err.message : 'NULL_TOKEN_INGRESS');
       
       this.logger.error(
-        `🚨 [SECURITY_ALERT] RT Gate Blocked | IP: ${ip} | Reason: ${failureReason}`,
+        `🚨 [SECURITY_BREACH_ATTEMPT] RT Gate Blocked | IP: ${ip} | Agent: ${userAgent} | Reason: ${failureReason}`,
       );
 
       /**
-       * [RTR PROTOCOL - EXCEPTION DIFFERENTIATION]
-       * IF EXPIRED (403): Signals the Frontend (Vue.js) to trigger a full logout
-       * and purge all local storage/session credentials.
+       * PROTOCOL: SESSION_EXPIRATION (403)
+       * Triggered when the cryptographic lifespan of the RT ends.
+       * Instruction to Frontend: Purge all local identity state and redirect to /login.
        */
       if (info?.message === 'jwt expired') {
         throw new ForbiddenException(
-          'Zenith Guard: Session expired. Immediate re-authentication required.'
+          'ZENITH_SHIELD: Session context expired. Re-authentication mandatory.',
         );
       }
 
       /**
-       * [STEALTH MODE]
-       * RETURN 401 (Unauthorized): For malformed or missing tokens to keep the
-       * system's security posture ambiguous to external reconnaissance probes.
+       * PROTOCOL: ACCESS_DENIED (401)
+       * Triggered on malformed, missing, or tampered tokens.
+       * Maintains a high security posture by providing generic rejection messages.
        */
-      throw new UnauthorizedException('Zenith Guard: Session access denied.');
+      throw new UnauthorizedException('ZENITH_SHIELD: Identity verification failed.');
     }
 
     /**
-     * [IDENTITY PASS-THROUGH]
-     * Returns the user object (Hydrated by RtStrategy with the raw refreshToken)
-     * to the request context for the second layer of verification (DB Hash).
+     * [PHASE 2] IDENTITY PASS-THROUGH
+     * The user object now contains the sub (ID) and the raw refreshToken.
+     * It is passed to the AuthService for the final DB-level 'Reuse Detection' check.
      */
     return user;
   }

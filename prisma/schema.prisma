@@ -1,13 +1,13 @@
 // -----------------------------------------------------------------------------
-// ZENITH CLOUD ARCHITECTURE - INFRASTRUCTURE LAYER v4.1 (MongoDB Edition)
+// ZENITH CLOUD ARCHITECTURE - MULTI-DEVICE IDENTITY REGISTRY v5.0
 // -----------------------------------------------------------------------------
 // @author Radouane Djoudi
-// @project Zenith Secure Engine
-// REFINEMENTS v4.1:
-// 1. MIGRATION: Optimized for MongoDB BSON structure.
-// 2. BUG FIX: Resolved P1012 by removing redundant indexes on unique fields.
-// 3. PERFORMANCE: Leveraged native MongoDB indexing for role-based queries.
-// 4. STORAGE: Local persistent storage architecture for HP-ProBook.
+// @project Zenith Secure Engine (Enterprise Edition)
+// REFINEMENTS v5.0:
+// 1. SESSION_ISOLATION: Migrated 'hashedRt' to a dedicated 'Session' model.
+// 2. CRYPTO_COMPLIANCE: Fully optimized for Argon2id hash storage.
+// 3. MULTI_DEVICE: Enabled concurrent sessions with independent rotation cycles.
+// 4. SECURITY_ORCHESTRATION: Integrated Device/IP telemetry for audit tracing.
 
 generator client {
   provider      = "prisma-client-js"
@@ -40,39 +40,58 @@ enum LogSeverity {
 // USER CORE IDENTITY
 // ==========================================
 model User {
-  /**
-   * PRIMARY IDENTITY: MongoDB BSON ObjectId.
-   * Mapping local "_id" to Prisma "id" for standard API consumption.
-   */
   id           String           @id @default(auto()) @map("_id") @db.ObjectId
-  email        String           @unique // Auto-indexed by MongoDB via @unique
+  email        String           @unique
   password     String
   firstName    String
   familyName   String
-  phoneNumber  String           @unique // Auto-indexed by MongoDB via @unique
+  phoneNumber  String?          @unique
   role         Role             @default(USER)
   
   /**
-   * ZENITH SHIELD: REFRESH TOKEN ROTATION HASH
-   * Stores the Bcrypt hash of the current RT.
+   * ZENITH SESSIONS REGISTRY:
+   * Array of active cryptographic contexts across multiple devices.
    */
-  hashedRt     String?  
+  sessions     Session[]        
   
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  // RELATION: Granular Access Control (PBAC)
   permissions  UserPermission[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
   @@map("users")
+  @@index([role])
+}
+
+// ==========================================
+// SESSION REGISTRY (Multi-Device Management)
+// ==========================================
+/**
+ * @model Session
+ * @description Manages active identity contexts for concurrent devices.
+ * Implements granular Refresh Token Rotation (RTR) per device.
+ */
+model Session {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
   
   /**
-   * PERFORMANCE INDEXES: 
-   * We only index non-unique fields here. 
-   * MongoDB automatically manages unique indexes for Email and PhoneNumber.
+   * HIGH-ENTROPY HASH: 
+   * Argon2id hash of the device-specific Refresh Token.
    */
-  @@index([role])
-  @@index([hashedRt]) 
+  hashedRt  String   @unique
+  
+  // DEVICE TELEMETRY: Forensic metadata for session identification.
+  userAgent String?  // e.g., "Mozilla/5.0 (iPhone; CPU iPhone OS 17...)"
+  ipAddress String?  // Client origin IP
+  
+  // RELATION: Linked to the master identity.
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("sessions")
 }
 
 // ==========================================
@@ -80,12 +99,8 @@ model User {
 // ==========================================
 model UserPermission {
   id      String @id @default(auto()) @map("_id") @db.ObjectId
-  action  String // e.g., "PROFILE_READ", "USER_DELETE"
+  action  String 
   
-  /**
-   * FOREIGN KEY RELATIONSHIP:
-   * Must use @db.ObjectId to match the User model's ID type.
-   */
   userId  String @db.ObjectId
   user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -100,18 +115,14 @@ model UserPermission {
 model AuditLog {
   id         String      @id @default(auto()) @map("_id") @db.ObjectId
   action     String      
-  entity     String?     // Target module (e.g., "Users", "Auth")
-  entityId   String?     // Specific record ID affected
+  entity     String?     
+  entityId   String?     
   
-  /**
-   * AUDIT TRACEABILITY:
-   * Relational link preserved for strict forensic continuity.
-   */
   userId     String?     @db.ObjectId
   userEmail  String?     
   ipAddress  String?     
   userAgent  String?     
-  details    Json?       // MongoDB native JSON support
+  details    Json?       
   
   severity   LogSeverity @default(INFO) 
   status     String      @default("SUCCESS") 
@@ -119,10 +130,6 @@ model AuditLog {
 
   @@map("audit_logs")
 
-  /**
-   * AUDIT INDEXES:
-   * Optimized for forensic dashboards and security telemetry.
-   */
   @@index([userId])
   @@index([action])
   @@index([severity])
