@@ -1,3 +1,12 @@
+/**
+ * @fileoverview Identity & Access Management (IAM) Kernel.
+ * Implements Multi-Device Session Orchestration with Hardware Fingerprinting.
+ * Inspired by Google's BeyondCorp and Netflix's Device-Bound Tokens.
+ * * @version 6.1.0
+ * @author Radouane Djoudi
+ * @license Enterprise - Sovereign Infrastructure
+ */
+
 import {
   ConflictException,
   ForbiddenException,
@@ -7,36 +16,30 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, Role, session as sessionType } from '@prisma/client'; // FIX: Changed Session to session
+import { Prisma, Role, session as sessionType } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { DeviceFingerprint } from '../common/utils/fingerprint.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { SigninDto, SignupDto } from './dto';
 
-/**
- * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) - ENTERPRISE KERNEL v5.1
- * -----------------------------------------------------------------------------
- * @class AuthService
- * @description Multi-device session orchestration with cross-device reuse detection.
- * * * ARCHITECTURAL STANDARDS:
- * 1. TYPE_SAFETY: Strict null checking and explicit interface enforcement.
- * 2. NUCLEAR_RECOIL: Global session revocation on single-token reuse detection.
- * 3. CRYPTOGRAPHY: Argon2id adaptive hashing (PHC Winner).
- */
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger('ZENITH_AUTH_CORE');
+  /** Internal telemetry provider for security auditing */
+  private readonly logger = new Logger('ZENITH_IAM_KERNEL');
 
   constructor(
-    private prisma: PrismaService,
-    private jwt: JwtService,
-    private config: ConfigService,
+    private readonly prisma: PrismaService,
+    private readonly jwt: JwtService,
+    private readonly config: ConfigService,
   ) {}
 
   /**
-   * @method signup
-   * @description Provisions a new identity and initializes the primary device session.
+   * Provisions a new identity and initializes a hardware-bound session.
+   * * @param {SignupDto} dto - Validated identity payload.
+   * @param {DeviceFingerprint} fp - Inbound hardware telemetry.
+   * @returns {Promise<{access_token: string, refresh_token: string}>}
    */
-  async signup(dto: SignupDto) {
+  async signup(dto: SignupDto, fp: DeviceFingerprint) {
     try {
       const hashedPassword = await argon2.hash(dto.password);
 
@@ -53,7 +56,6 @@ export class AuthService {
               data: [
                 { action: 'PROFILE_READ' },
                 { action: 'PROFILE_UPDATE' },
-                { action: 'PROFILE_DELETE' },
               ],
             },
           },
@@ -61,112 +63,107 @@ export class AuthService {
         select: { id: true, email: true, role: true, permissions: { select: { action: true } } },
       });
 
-      this.logger.log(`AUDIT [IDENTITY_PROVISIONED]: User ID: ${newUser.id}`);
+      this.logger.log(`AUDIT [IDENTITY_PROVISIONED]: ID: ${newUser.id} | Device: ${fp.deviceId}`);
 
       const permissions = newUser.permissions.map(p => p.action);
       const tokens = await this.signTokens(newUser.id, newUser.email, newUser.role, permissions);
 
-      await this.createSession(newUser.id, tokens.refresh_token);
+      await this.createSession(newUser.id, tokens.refresh_token, fp);
       return tokens;
 
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('ZENITH_IAM: Registry collision detected.');
+        throw new ConflictException('ZENITH_IAM: Registry collision (Identity already exists).');
       }
       throw error;
     }
   }
 
   /**
-   * @method signin
-   * @description Authenticates credentials and appends a new session.
+   * Authenticates identity and appends a hardware-bound session context.
+   * Implements constant-time verification to prevent side-channel leaks.
    */
-  async signin(dto: SigninDto) {
+  async signin(dto: SigninDto, fp: DeviceFingerprint) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       select: { id: true, email: true, password: true, role: true, permissions: { select: { action: true } } },
     });
 
+    /** 🛡️ Anti-Enumeration Dummy Hash */
     const dummyHash = '$argon2id$v=19$m=65536,t=3,p=4$66YmZp...'; 
     const isPasswordValid = user 
       ? await argon2.verify(user.password, dto.password)
       : await argon2.verify(dummyHash, dto.password);
 
     if (!user || !isPasswordValid) {
-      this.logger.warn(`SECURITY_ALERT [SIGNIN_ATTEMPT]: Unauthorized target: ${dto.email}`);
+      this.logger.warn(`SECURITY_ALERT [SIGNIN_FAIL]: Unauthorized access on ${dto.email}`);
       throw new UnauthorizedException('ZENITH_GUARD: Invalid credentials.');
     }
 
     const permissions = user.permissions.map(p => p.action);
     const tokens = await this.signTokens(user.id, user.email, user.role, permissions);
 
-    await this.createSession(user.id, tokens.refresh_token);
+    await this.createSession(user.id, tokens.refresh_token, fp);
     return tokens;
   }
 
   /**
-   * @method refreshTokens
-   * @description RTR with Multi-Device Reuse Detection.
-   * FIXES: Resolved TS2322 (Type 'null'), TS18047 (Possibly null), and TS2339 (Property 'id').
+   * Executes RTR (Refresh Token Rotation) with Hardware Integrity Verification.
+   * Implements automated global lockout upon detection of token reuse or device hijacking.
    */
-  async refreshTokens(userId: string, rawRt: string) {
-    const userSessions = await this.prisma.session.findMany({
-      where: { userId },
-    });
+  async refreshTokens(userId: string, rawRt: string, fp: DeviceFingerprint) {
+    const userSessions = await this.prisma.session.findMany({ where: { userId } });
 
-    /**
-     * 🟢 FIX TS2322: Explicitly typing the variable as session | null.
-     */
-    let activeSession: sessionType | null = null; // Changed to match schema
+    let activeSession: sessionType | null = null;
 
     for (const session of userSessions) {
-      const isMatch = await argon2.verify(session.hashedRt, rawRt);
-      if (isMatch) {
+      if (await argon2.verify(session.hashedRt, rawRt)) {
         activeSession = session;
         break;
       }
     }
 
-    /**
-     * 🛡️ REUSE DETECTION PROTOCOL
-     */
+    /** 🛡️ REUSE DETECTION: Automatic Account Lockout */
     if (!activeSession) {
       await this.signoutAll(userId); 
-      this.logger.error(`CRITICAL_ALERT [TOKEN_REUSE_DETECTED]: Potential breach for ID ${userId}.`);
-      throw new ForbiddenException('ZENITH_SHIELD: Security anomaly detected. Global lockout engaged.');
+      this.logger.error(`CRITICAL [REUSE_DETECTED]: Potential breach for User ${userId}. Revoking all sessions.`);
+      throw new ForbiddenException('ZENITH_SHIELD: Security anomaly detected. Account locked.');
     }
 
-    // Provision new tokens
+    /** 🛡️ HIJACKING DETECTION: Hardware Telemetry Verification */
+    if (activeSession.deviceId !== fp.deviceId) {
+      await this.signoutAll(userId);
+      this.logger.error(`CRITICAL [HIJACK_DETECTED]: Identity ${userId} device mismatch. Lockout triggered.`);
+      throw new ForbiddenException('ZENITH_SHIELD: Session hijacking attempt detected.');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { email: true, role: true, permissions: { select: { action: true } } },
     });
 
-    /**
-     * 🟢 FIX TS18047: Identity Context Verification.
-     */
-    if (!user) {
-      throw new ForbiddenException('ZENITH_GUARD: Identity context lost.');
-    }
+    if (!user) throw new ForbiddenException('ZENITH_GUARD: Identity lost.');
 
-    const permissions = user.permissions.map(p => p.action);
-    const tokens = await this.signTokens(userId, user.email, user.role, permissions);
-
+    const tokens = await this.signTokens(userId, user.email, user.role, user.permissions.map(p => p.action));
     const newHashedRt = await argon2.hash(tokens.refresh_token);
 
-    /**
-     * 🟢 FIX TS2339: activeSession is NOT null due to the guard above.
-     */
     await this.prisma.session.update({
       where: { id: activeSession.id },
-      data: { hashedRt: newHashedRt },
+      data: { 
+        hashedRt: newHashedRt,
+        os: fp.os,
+        browser: fp.browser,
+      },
     });
 
     return tokens;
   }
 
   /**
-   * @method signout
+   * Targeted Session Revocation.
+   * Invalidates a single hardware context without affecting other active sessions.
+   * * @param {string} userId - Target identity.
+   * @param {string} rawRt - Token context to be invalidated.
    */
   async signout(userId: string, rawRt: string) {
     const sessions = await this.prisma.session.findMany({ where: { userId } });
@@ -178,39 +175,46 @@ export class AuthService {
       }
     }
 
-    this.logger.log(`AUDIT [SESSION_DECOUPLED]: Single device logout for ${userId}`);
+    this.logger.log(`AUDIT [SESSION_DECOUPLED]: Single device logout for Identity ${userId}`);
     return { status: 'OK', message: 'Specific session invalidated.' };
   }
 
   /**
-   * @method signoutAll
+   * Nuclear Session Purge.
+   * Terminates all active hardware contexts for a specific identity.
    */
   async signoutAll(userId: string) {
     await this.prisma.session.deleteMany({ where: { userId } });
-    this.logger.warn(`AUDIT [GLOBAL_LOGOUT]: All sessions purged for Identity ${userId}`);
+    this.logger.warn(`AUDIT [GLOBAL_LOGOUT]: All hardware contexts purged for Identity ${userId}`);
     return { status: 'OK', message: 'All active sessions invalidated.' };
   }
 
   /**
-   * @private @method createSession
+   * Orchestrates the creation of hardware-bound session metadata.
+   * @private
    */
-  private async createSession(userId: string, rawRt: string) {
+  private async createSession(userId: string, rawRt: string, fp: DeviceFingerprint) {
     const hashedRt = await argon2.hash(rawRt);
     await this.prisma.session.create({
       data: {
         userId,
         hashedRt,
+        deviceId: fp.deviceId,
+        os: fp.os,
+        browser: fp.browser,
+        device: fp.deviceType,
       },
     });
   }
 
   /**
-   * @private @method signTokens
+   * Signs cryptographic payloads with enterprise-grade rotation intervals.
+   * @private
    */
-  private async signTokens(userId: string, email: string, role: string, permissions: string[]) {
-    const payload = { sub: userId, email, role, perms: permissions };
+  private async signTokens(uId: string, email: string, role: string, perms: string[]) {
+    const payload = { sub: uId, email, role, perms };
 
-    const [accessToken, refreshToken] = await Promise.all([
+    const [at, rt] = await Promise.all([
       this.jwt.signAsync(payload, {
         secret: this.config.get<string>('AT_SECRET'),
         expiresIn: '15m', 
@@ -221,6 +225,6 @@ export class AuthService {
       }),
     ]);
 
-    return { access_token: accessToken, refresh_token: refreshToken };
+    return { access_token: at, refresh_token: rt };
   }
 }

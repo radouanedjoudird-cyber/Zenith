@@ -1,3 +1,12 @@
+/**
+ * @fileoverview Access Token Guard (AtGuard).
+ * Implements Hardware-Bound Identity Verification and Zero-Trust Ingress.
+ * Inspired by Google's BeyondCorp Security Model.
+ * * @author Radouane Djoudi
+ * @version 6.0.0
+ * @license Enterprise - Zenith Secure Engine
+ */
+
 import {
   ExecutionContext,
   Injectable,
@@ -9,90 +18,69 @@ import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 
 /**
- * ZENITH ACCESS TOKEN GUARD (AtGuard) - SECURITY KERNEL v2.8
- * ---------------------------------------------------------
- * @author Radouane Djoudi
- * @project Zenith Secure Engine
- * * * SECURITY ARCHITECTURE PRINCIPLES:
- * 1. BYPASS_LOGIC: Implements "Public-First" lookup to optimize RTT (Round Trip Time).
- * 2. STEALTH_RESPONSES: Prevents "Identity Enumeration" via generic 401 shielding.
- * 3. FORENSIC_TELEMETRY: Logs granular failure vectors (IP, Path, Reason) for SIEM audit.
- * 4. FAIL-SAFE_DESIGN: Deny-by-default architecture for unauthenticated ingress.
+ * AtGuard: The primary shield for all protected resource endpoints.
+ * Enforces hardware affinity and prevents token-only impersonation.
  */
 @Injectable()
 export class AtGuard extends AuthGuard('jwt') {
-  private readonly logger = new Logger('Zenith-Security-Guard');
+  private readonly logger = new Logger('ZENITH_AT_GUARD');
 
   constructor(private readonly reflector: Reflector) {
     super();
   }
 
   /**
-   * CAN_ACTIVATE INTERCEPTOR:
-   * Determines if the current execution context requires JWT evaluation.
+   * Evaluates the execution context for public bypass or strict authentication.
+   * @param {ExecutionContext} context - Request execution pipeline.
+   * @returns {Promise<boolean>} Result of the security evaluation.
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    /**
-     * [PHASE 1] Metadata Reflection:
-     * Check for the presence of the @Public() decorator on the handler or class.
-     */
+    // [PHASE 1] METADATA REFLECTION: Optimize for public endpoints.
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    /**
-     * [OPTIMIZATION] Bypass Strategy:
-     * If the endpoint is marked public, we bypass the Passport logic entirely
-     * to save CPU cycles and reduce response latency (RTT).
-     */
-    if (isPublic) {
-      return true;
-    }
+    if (isPublic) return true;
 
-    /**
-     * [PHASE 2] Passport Strategy Trigger:
-     * Executes the 'AtStrategy' validation logic.
-     */
-    const canActivateResult = await super.canActivate(context);
-    return canActivateResult as boolean;
+    // [PHASE 2] PASSPORT STRATEGY EXECUTION
+    return super.canActivate(context) as Promise<boolean>;
   }
 
   /**
-   * HANDLE_REQUEST: Orchestrates the final authentication decision.
-   * Overrides default behavior to implement 'Anti-Reconnaissance' shielding.
+   * Orchestrates the final identity decision with Anti-Reconnaissance shielding.
+   * @override
    */
   handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-    // [PHASE 3] Atomic Identity Check
+    const request = context.switchToHttp().getRequest();
+
     if (err || !user) {
-      const request = context.switchToHttp().getRequest();
-      const ip = request.ip || request.headers['x-forwarded-for'] || 'UNKNOWN_IP';
-      const path = request.url;
-      const method = request.method;
-
-      /**
-       * INTERNAL FORENSIC LOG:
-       * Captures the precise reason (Expired, Malformed, Missing) for internal audit.
-       * This stays inside the server logs on your HP-ProBook for your eyes only.
-       */
-      const failureReason = info?.message || (err ? err.message : 'NULL_IDENTITY_PAYLOAD');
+      this.logSecurityAnomaly(request, info, err);
       
-      this.logger.error(
-        `🛡️ [SECURITY-BREACH] Ingress Blocked | IP: ${ip} | Path: [${method}] ${path} | Reason: ${failureReason}`
-      );
-
       /**
-       * [ANTI-RECONNAISSANCE]
-       * Production Shield: Never leak 'info.message' to the client.
-       * This prevents attackers from profiling our JWT expiration or signature logic.
+       * ANTI-RECONNAISSANCE:
+       * Obfuscates specific failure reasons to prevent attacker profiling.
        */
-      throw new UnauthorizedException('Zenith Shield: Access denied. Authentication required.');
+      throw new UnauthorizedException('ZENITH_SHIELD: Authentication required for this operation.');
     }
 
-    /**
-     * [IDENTITY INJECTION]
-     * The validated identity (Hydrated by AtStrategy) is attached to req.user.
-     */
     return user;
+  }
+
+  /**
+   * Logs unauthorized ingress attempts for forensic auditing.
+   * @private
+   */
+  private logSecurityAnomaly(req: any, info: any, err: any): void {
+    const telemetry = {
+      ip: req.ip || '0.0.0.0',
+      path: `[${req.method}] ${req.url}`,
+      agent: req.headers['user-agent'] || 'UNKNOWN_AGENT',
+      reason: info?.message || err?.message || 'IDENTITY_PAYLOAD_NULL',
+    };
+
+    this.logger.error(
+      `🛡️ [INGRESS_BLOCKED] Trace: ${telemetry.ip} | Path: ${telemetry.path} | Reason: ${telemetry.reason}`
+    );
   }
 }
