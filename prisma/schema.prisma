@@ -1,9 +1,10 @@
 // -----------------------------------------------------------------------------
-// 🌐 ZENITH PERSISTENCE LAYER - CORE SCHEMA v5.3
+// 🌐 ZENITH PERSISTENCE LAYER - CORE SCHEMA v6.0 (Enterprise Forensic Edition)
 // -----------------------------------------------------------------------------
 // @author Radouane Djoudi
 // @engine MongoDB with ReplicaSet Optimization
-// @status FINAL_REVISION_CLEAN
+// @security Forensic Fingerprinting & Hardware Identity Mapping
+// @status STABLE_RELEASE
 // -----------------------------------------------------------------------------
 
 generator client {
@@ -30,6 +31,7 @@ enum LogStatus {
   FAILURE
   DENIED
   SUSPICIOUS
+  BREACH_ATTEMPT
 }
 
 enum Severity {
@@ -44,11 +46,11 @@ enum Severity {
 
 model user {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  email       String   @unique // Prisma automatically creates an index for @unique
+  email       String   @unique
   password    String
   firstName   String
   familyName  String
-  phoneNumber String   @unique // Prisma automatically creates an index for @unique
+  phoneNumber String   @unique
   role        Role     @default(USER)
   createdAt   DateTime @default(now()) @db.Date
   updatedAt   DateTime @updatedAt @db.Date
@@ -59,7 +61,6 @@ model user {
 
   @@map("users")
   @@index([role])
-  // Removed @@index([email]) as it is redundant due to @unique
 }
 
 model session {
@@ -67,6 +68,14 @@ model session {
   userId    String   @db.ObjectId
   user      user     @relation(fields: [userId], references: [id], onDelete: Cascade)
   hashedRt  String   @unique
+
+  // 🛡️ ENTERPRISE FINGERPRINTING FIELDS
+  deviceId  String?  // Unique Hardware/Browser Signature
+  os        String?  // Operating System (e.g., Windows 11, Linux)
+  browser   String?  // Browser Engine (e.g., Chrome 124, Firefox)
+  device    String?  // Device Category (Desktop, Mobile, Tablet)
+  cpuArch   String?  // CPU Architecture (x64, arm64)
+  
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now()) @db.Date
@@ -74,6 +83,7 @@ model session {
 
   @@map("sessions")
   @@index([userId])
+  @@index([deviceId]) // Optimized for session hijacking detection
 }
 
 // [3] FORENSIC & TELEMETRY MODELS
@@ -86,12 +96,19 @@ model auditLog {
   entityId  String?   @db.ObjectId
   userId    String?   @db.ObjectId
   userEmail String?
+  
+  // 🛡️ FORENSIC CONTEXT
+  deviceId  String?
+  os        String?
+  browser   String?
   ipAddress String?
   userAgent String?
+
+  // NETWORK & PROTOCOL
   method    String?
   path      String?
   
-  // METADATA SNAPSHOTS
+  // DATA SNAPSHOTS
   payload   Json?     
   newData   Json?     
   oldData   Json?     
@@ -102,6 +119,7 @@ model auditLog {
 
   @@map("audit_logs")
   @@index([userId])
+  @@index([deviceId])
   @@index([action])
   @@index([severity])
   @@index([createdAt])
