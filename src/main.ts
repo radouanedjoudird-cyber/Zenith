@@ -1,11 +1,17 @@
 /**
- * @fileoverview Zenith Secure Kernel - Enterprise Bootstrap Protocol.
- * Orchestrates the initialization of the high-availability security engine.
- * Implements Zero-Trust ingress, hardware-bound telemetry, and forensic auditing.
- * * @package Zenith-Core
- * @version 6.0.0
- * @author Radouane Djoudi
- * @license Restricted - Enterprise Architecture
+ * ============================================================================
+ * ZENITH SECURE KERNEL - ENTERPRISE BOOTSTRAP PROTOCOL
+ * ============================================================================
+ * @module Main
+ * @description Orchestrates the ignition of the high-availability security engine.
+ * * ARCHITECTURAL DESIGN (BIG-TECH STANDARDS):
+ * 1. RESILIENCE: Graceful shutdown hooks for Zero-Downtime deployments in K8s.
+ * 2. SECURITY: Hardened Helmet configuration and strict CORS resource isolation.
+ * 3. VALIDATION: Fail-fast validation strategy to optimize CPU cycles for scaling.
+ * 4. TRACEABILITY: Integrated Winston logger for forensic system audits.
+ * * @author Radouane Djoudi
+ * @version 7.0.0
+ * ============================================================================
  */
 
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
@@ -16,59 +22,56 @@ import helmet from 'helmet';
 import { WinstonModule } from 'nest-winston';
 import { AppModule } from './app.module';
 
-/* --- SECURITY SHIELD INTEGRATION --- */
+/* --- INFRASTRUCTURE INTEGRATION --- */
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { SecurityBreachFilter } from './common/filters/security-breach.filter';
 import { winstonConfig } from './common/logger/winston.config';
 
-/**
- * Boots the Zenith Secure Engine.
- * Configures the execution environment, security perimeter, and API contracts.
- * * @async
- * @function bootstrap
- * @returns {Promise<void>}
- */
 async function bootstrap(): Promise<void> {
   /**
    * INITIALIZATION:
-   * Booting with Winston as the primary telemetry provider for forensic traceability.
+   * Booting with Winston for high-fidelity traceability.
+   * Internal Nest logger is replaced by Winston to ensure centralized log formatting.
    */
   const app = await NestFactory.create(AppModule, {
     logger: WinstonModule.createLogger(winstonConfig),
-    cors: false, // Managed via strict whitelist in the networking section.
+    cors: false, // Managed explicitly below
   });
 
   const logger = new Logger('ZENITH_BOOTSTRAP');
   const port = process.env.PORT || 3000;
 
   /**
-   * SECTION 1: NETWORK & SECURITY HEADERS
-   * Implements Helmet for CSP, HSTS, and protection against sniffing attacks.
+   * SECTION 1: SECURITY PERIMETER (HELMET)
+   * Enforces strict HTTP headers to mitigate XSS, Clickjacking, and Sniffing.
+   * Strategy: Standardize security posture across all pods.
    */
   app.use(helmet({
     contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+    crossOriginEmbedderPolicy: true,
   }));
 
   /**
    * SECTION 2: THROUGHPUT OPTIMIZATION
-   * Compresses payloads to maximize bandwidth efficiency in distributed nodes.
+   * Compresses HTTP payloads to maximize bandwidth efficiency. 
+   * Vital for 'Scaling' experiments (RQ2) to reduce network I/O latency.
    */
   app.use(compression());
 
   /**
-   * SECTION 3: CORS - RESOURCE ISOLATION
-   * Enforces strict origin control to prevent CSRF and cross-domain identity theft.
+   * SECTION 3: CORS - IDENTITY-BASED RESOURCE ISOLATION
+   * Prevents unauthorized cross-domain telemetry leakage.
    */
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:5173',
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173', 'http://localhost:3000'],
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
     credentials: true,
-    exposedHeaders: ['Authorization', 'X-Session-ID', 'X-Trace-ID'], 
+    exposedHeaders: ['Authorization', 'X-Trace-ID', 'X-Tenant-ID'], 
   });
 
   /**
-   * SECTION 4: ARCHITECTURAL STRUCTURE
-   * Implements Global Prefixing and Semantic Versioning (SemVer).
+   * SECTION 4: ARCHITECTURAL VERSIONING (SemVer)
+   * URI-based versioning (e.g., /api/v1/...) enables non-breaking rolling updates.
    */
   app.setGlobalPrefix('api');
   app.enableVersioning({
@@ -77,10 +80,9 @@ async function bootstrap(): Promise<void> {
   });
 
   /**
-   * SECTION 5: FAULT TOLERANCE & SECURITY INTERCEPTION
-   * 🛡️ Multi-layered Defense:
-   * 1. HttpExceptionFilter: Catch-all for unified error responses.
-   * 2. SecurityBreachFilter: Specialized radar for device-identity anomalies.
+   * SECTION 5: GLOBAL EXCEPTION FILTERS
+   * Standardizes the system's "Failure Domain".
+   * This ensures the telemetry engine receives consistent error signals.
    */
   app.useGlobalFilters(
     new HttpExceptionFilter(),    
@@ -88,55 +90,48 @@ async function bootstrap(): Promise<void> {
   );
 
   /**
-   * SECTION 6: DATA INTEGRITY & VALIDATION
-   * Enforces strict DTO contracts and prevents mass-assignment vulnerabilities.
+   * SECTION 6: RESOURCE-EFFICIENT VALIDATION (Fail-Fast)
+   * Strategy: Reject malformed payloads early to preserve RAM/CPU for legitimate processing.
    */
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,              
-      forbidNonWhitelisted: true,   
-      transform: true,              
+      whitelist: true,               
+      forbidNonWhitelisted: true,    
+      transform: true,               
       transformOptions: { enableImplicitConversion: true },
       disableErrorMessages: process.env.NODE_ENV === 'production',
     }),
   );
 
   /**
-   * SECTION 7: API BLUEPRINT (SWAGGER)
-   * Exposes system capabilities for Permission-Based Access Control (PBAC).
+   * SECTION 7: API BLUEPRINT & INFRAISTRY REGISTRY
    */
-  const config = new DocumentBuilder()
-    .setTitle('Zenith Secure Engine | Registry')
-    .setDescription(
-      'Enterprise IAM Kernel with Hardware-Bound Session Guarding.\n\n' +
-      '**Infrastructure:** Node.js NestJS v10 | MongoDB | Prisma.',
-    )
-    .setVersion('6.0.0')
-    .setContact('Radouane Djoudi', 'https://github.com/radouanedjoudi', 'admin@zenith-systems.dz')
-    .addBearerAuth(
-      { 
-        type: 'http', 
-        scheme: 'bearer', 
-        bearerFormat: 'JWT',
-        name: 'Authorization',
-        in: 'header'
-      }, 
-      'JWT-auth' 
-    )
-    .build();
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Zenith Secure Engine | System Registry')
+      .setDescription(
+        'Enterprise IAM & Distributed Systems Kernel.\n\n' +
+        '**Status:** Predictive Autoscaling Ready (KEDA/Prometheus Optimized).'
+      )
+      .setVersion('7.0.0')
+      .setContact('Radouane Djoudi', 'https://github.com/radouanedjoudi', 'admin@zenith-systems.dz')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', name: 'Authorization', in: 'header' }, 
+        'JWT-auth' 
+      )
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true, 
-      displayRequestDuration: true, 
-    },
-    customSiteTitle: 'Zenith API Docs | Security Intelligence',
-  });
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document, {
+      swaggerOptions: { persistAuthorization: true, displayRequestDuration: true },
+      customSiteTitle: 'Zenith Docs | Infrastructure Intelligence',
+    });
+  }
 
   /**
-   * SECTION 8: LIFECYCLE MANAGEMENT
-   * Ensures graceful termination of database pools and background processes.
+   * SECTION 8: LIFECYCLE & K8s COMPLIANCE
+   * Enables shutdown hooks to allow the pod to drain active requests 
+   * during horizontal scale-down events (Autoscaling).
    */
   app.enableShutdownHooks();
 
@@ -145,13 +140,12 @@ async function bootstrap(): Promise<void> {
    */
   await app.listen(port);
   
-  logger.log(`🚀 [KERNEL] Zenith Engine v6.0 operational on port: ${port}`);
-  logger.log(`🛡️ [INFRA] Hardware Fingerprinting and Forensic Shield active.`);
+  logger.log(`\x1b[32m🚀 [KERNEL] Zenith Engine v7.0 operational on port: ${port}\x1b[0m`);
+  logger.log(`\x1b[34m🛡️ [INFRA] Predictive Monitoring & Resource Guard active.\x1b[0m`);
 }
 
 /**
- * GLOBAL PANIC HANDLER:
- * Captures catastrophic failures during the boot sequence.
+ * GLOBAL PANIC RECOVERY PROTOCOL
  */
 bootstrap().catch((err) => {
   const panicLogger = new Logger('ZENITH_PANIC');

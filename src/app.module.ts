@@ -1,53 +1,78 @@
+/**
+ * ============================================================================
+ * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v7.0
+ * ============================================================================
+ * @module AppModule
+ * @description Central Kernel for Enterprise Infrastructure Orchestration.
+ * * ARCHITECTURAL DESIGN (FAANG COMPLIANT):
+ * 1. DEFENSE-IN-DEPTH: Layered security via Throttler -> AtGuard -> Permissions.
+ * 2. TELEMETRY_AUTO_INJECTION: Global interceptors for Zero-Touch observability.
+ * 3. KERNEL_STABILITY: High-performance Config cache & Prisma persistence.
+ * * @author Radouane Djoudi
+ * @version 7.0.0
+ * ============================================================================
+ */
+
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+
+// --- INFRASTRUCTURE LAYER ---
+import { MonitoringModule } from './common/monitoring/monitoring.module';
+import { PrismaModule } from './prisma/prisma.module';
+
+// --- DOMAIN LAYER ---
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+
+// --- SECURITY & CROSS-CUTTING CONCERNS ---
 import { AtGuard } from './auth/guards/at.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
-import { PrismaModule } from './prisma/prisma.module';
-import { UsersModule } from './users/users.module';
+import { MonitoringInterceptor } from './common/interceptors/monitoring.interceptor';
 
-/**
- * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v5.0
- * -----------------------------------------------------------------------------
- * @author Radouane Djoudi
- * @project Zenith Secure Engine (Enterprise Edition)
- * * ARCHITECTURAL LAYERS:
- * 1. INGRESS_SHIELD: Rate limiting & Anti-DoS orchestration.
- * 2. IDENTITY_STRatum: Global JWT validation with RTR awareness.
- * 3. PERMISSION_FABRIC: PBAC (Permissions-Based Access Control) enforcement.
- * 4. OBSERVABILITY_PLANE: Advanced forensic auditing & telemetry.
- */
 @Module({
   imports: [
     /**
      * CONFIGURATION KERNEL:
-     * High-performance environment orchestration with caching.
+     * High-performance orchestration with variable expansion.
+     * Cache is enabled to reduce I/O overhead during high-traffic bursts.
      */
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
-      expandVariables: true, // Allows using vars inside .env (e.g. DB_URL=${HOST}/...)
+      expandVariables: true,
     }),
 
     /**
-     * RATE LIMITING ENGINE (ADVANCED ANTI-DOS):
-     * Dual-tier protection strategy for distributed infrastructure.
+     * OBSERVABILITY PLANE (RQ2 SUPPORT):
+     * Orchestrates Prometheus telemetry and manual registry links.
+     * Centralized here to ensure all domain modules are automatically scraped.
      */
-    ThrottlerModule.forRoot([{
-      name: 'standard_flow',
-      ttl: 60000,   // 1 minute
-      limit: 120,   // Increased for high-concurrency micro-frontends
-    }, {
-      name: 'critical_auth',
-      ttl: 60000,   // 1 minute
-      limit: 7,     // Strict limit for login/refresh attempts
-    }]),
+    MonitoringModule,
 
     /**
-     * INFRASTRUCTURE & DOMAIN CORE:
+     * RATE LIMITING ENGINE (ANTI-DoS STRATEGY):
+     * Protects the underlying infrastructure from resource exhaustion attacks.
+     * @standard_flow: Optimized for high-throughput mobile/web clients.
+     * @critical_auth: Mitigates brute-force and credential stuffing.
+     */
+    ThrottlerModule.forRoot([
+      {
+        name: 'standard_flow',
+        ttl: 60000,   // 60 Seconds
+        limit: 150,   // Balanced for microservices latency
+      }, 
+      {
+        name: 'critical_auth',
+        ttl: 60000,   
+        limit: 5,     // Hardened for security-first operations
+      }
+    ]),
+
+    /**
+     * DATA PERSISTENCE & BUSINESS DOMAINS:
      */
     PrismaModule,
     AuthModule,
@@ -55,8 +80,8 @@ import { UsersModule } from './users/users.module';
   ],
   providers: [
     /**
-     * SHIELD 1: NETWORK RESILIENCE
-     * Prevents infrastructure exhaustion at the ingress point.
+     * LAYER 1: NETWORK RESILIENCE
+     * Guards the application boundary against traffic spikes.
      */
     {
       provide: APP_GUARD,
@@ -64,8 +89,9 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * SHIELD 2: GLOBAL AUTHENTICATION (Zero-Trust)
-     * Enforces mandatory JWT verification across all endpoints.
+     * LAYER 2: IDENTITY ENFORCEMENT (Zero-Trust)
+     * Ensures all requests are authenticated by default.
+     * Uses 'Reflector' to allow @Public() overrides where necessary.
      */
     {
       provide: APP_GUARD,
@@ -73,8 +99,8 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * SHIELD 3: GRANULAR PBAC AUTHORIZATION
-     * Validates domain-specific permissions before handler execution.
+     * LAYER 3: PBAC AUTHORIZATION
+     * Evaluates fine-grained permissions after identity is established.
      */
     {
       provide: APP_GUARD,
@@ -82,12 +108,22 @@ import { UsersModule } from './users/users.module';
     },
 
     /**
-     * TELEMETRY: ADVANCED FORENSIC INTERCEPTOR
-     * Captures system-wide state changes and data snapshots for auditing.
+     * PIPELINE 1: FORENSIC AUDITING
+     * Non-blocking capture of state changes for regulatory compliance.
      */
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
+    },
+
+    /**
+     * PIPELINE 2: TELEMETRY ENGINE
+     * Captures SLIs (Service Level Indicators) for the KEDA Autoscaler.
+     * This is the technical core of the thesis evaluation phase.
+     */
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: MonitoringInterceptor,
     },
   ],
 })

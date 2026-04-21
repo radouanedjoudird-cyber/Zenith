@@ -1,10 +1,9 @@
 /**
- * @fileoverview Access Token Guard (AtGuard).
- * Implements Hardware-Bound Identity Verification and Zero-Trust Ingress.
- * Inspired by Google's BeyondCorp Security Model.
- * * @author Radouane Djoudi
- * @version 6.0.0
- * @license Enterprise - Zenith Secure Engine
+ * @fileoverview ACCESS TOKEN GUARD (AtGuard) - ENTERPRISE SECURITY SHIELD
+ * @version 6.1.0
+ * @author Radouane Djoudi
+ * @description Implements Zero-Trust Ingress based on Google's BeyondCorp Model.
+ * Orchestrates Identity Verification with integrated Anti-Reconnaissance logic.
  */
 
 import {
@@ -15,11 +14,13 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
+import { lastValueFrom, Observable } from 'rxjs';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 
 /**
- * AtGuard: The primary shield for all protected resource endpoints.
- * Enforces hardware affinity and prevents token-only impersonation.
+ * @class AtGuard
+ * @description The primary shield for Zenith resources. 
+ * Integrates metadata reflection for public bypass (e.g., Metrics/Health).
  */
 @Injectable()
 export class AtGuard extends AuthGuard('jwt') {
@@ -30,25 +31,41 @@ export class AtGuard extends AuthGuard('jwt') {
   }
 
   /**
-   * Evaluates the execution context for public bypass or strict authentication.
-   * @param {ExecutionContext} context - Request execution pipeline.
-   * @returns {Promise<boolean>} Result of the security evaluation.
+   * Evaluates the execution context for security enforcement.
+   * Logic: Metadata Bypass -> Strategy Execution -> Forensic Evaluation.
+   * @override
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // [PHASE 1] METADATA REFLECTION: Optimize for public endpoints.
+    /**
+     * PHASE 1: METADATA REFLECTION
+     * Checks for @Public() marker to allow infrastructure tools (Prometheus/K8s) to pass.
+     */
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    if (isPublic) return true;
+    if (isPublic) {
+      return true;
+    }
 
-    // [PHASE 2] PASSPORT STRATEGY EXECUTION
-    return super.canActivate(context) as Promise<boolean>;
+    /**
+     * PHASE 2: PASSPORT STRATEGY EXECUTION
+     * Invokes the JWT Strategy. Handles both Observable and Promise returns 
+     * to maintain high-performance throughput.
+     */
+    const result = super.canActivate(context);
+    
+    if (result instanceof Observable) {
+      return lastValueFrom(result);
+    }
+    
+    return result as Promise<boolean>;
   }
 
   /**
-   * Orchestrates the final identity decision with Anti-Reconnaissance shielding.
+   * Final Identity Decision & Anti-Reconnaissance Shielding.
+   * Obfuscates internal errors to prevent system profiling by attackers.
    * @override
    */
   handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
@@ -58,10 +75,12 @@ export class AtGuard extends AuthGuard('jwt') {
       this.logSecurityAnomaly(request, info, err);
       
       /**
-       * ANTI-RECONNAISSANCE:
-       * Obfuscates specific failure reasons to prevent attacker profiling.
+       * ENTERPRISE POLICY: ANTI-RECONNAISSANCE
+       * We throw a standardized exception to avoid leaking token-expiry or signature details.
        */
-      throw new UnauthorizedException('ZENITH_SHIELD: Authentication required for this operation.');
+      throw new UnauthorizedException(
+        'ZENITH_SHIELD: Authentication required for this operation.'
+      );
     }
 
     return user;
@@ -75,7 +94,6 @@ export class AtGuard extends AuthGuard('jwt') {
     const telemetry = {
       ip: req.ip || '0.0.0.0',
       path: `[${req.method}] ${req.url}`,
-      agent: req.headers['user-agent'] || 'UNKNOWN_AGENT',
       reason: info?.message || err?.message || 'IDENTITY_PAYLOAD_NULL',
     };
 
