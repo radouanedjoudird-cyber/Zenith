@@ -1,15 +1,15 @@
 /**
  * ============================================================================
- * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v7.0
+ * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v7.1
  * ============================================================================
  * @module AppModule
  * @description Central Kernel for Enterprise Infrastructure Orchestration.
  * * ARCHITECTURAL DESIGN (FAANG COMPLIANT):
- * 1. DEFENSE-IN-DEPTH: Layered security via Throttler -> AtGuard -> Permissions.
- * 2. TELEMETRY_AUTO_INJECTION: Global interceptors for Zero-Touch observability.
- * 3. KERNEL_STABILITY: High-performance Config cache & Prisma persistence.
+ * 1. DEFENSE-IN-DEPTH: Tiered security via Throttler -> AtGuard -> Permissions.
+ * 2. CLOUD-NATIVE RELIABILITY: Integrated Health Probes & Stress Simulation.
+ * 3. ZERO-TOUCH OBSERVABILITY: Automated telemetry for KEDA predictive scaling.
  * * @author Radouane Djoudi
- * @version 7.0.0
+ * @version 7.1.0 (Reliability Phase)
  * ============================================================================
  */
 
@@ -18,8 +18,9 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
-// --- INFRASTRUCTURE LAYER ---
+// --- INFRASTRUCTURE & RELIABILITY LAYER ---
 import { MonitoringModule } from './common/monitoring/monitoring.module';
+import { InfraModule } from './infra/infra.module'; // <--- NEW: Reliability Engine
 import { PrismaModule } from './prisma/prisma.module';
 
 // --- DOMAIN LAYER ---
@@ -36,8 +37,7 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
   imports: [
     /**
      * CONFIGURATION KERNEL:
-     * High-performance orchestration with variable expansion.
-     * Cache is enabled to reduce I/O overhead during high-traffic bursts.
+     * High-performance orchestration with variable expansion and caching.
      */
     ConfigModule.forRoot({
       isGlobal: true,
@@ -46,33 +46,37 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
     }),
 
     /**
-     * OBSERVABILITY PLANE (RQ2 SUPPORT):
-     * Orchestrates Prometheus telemetry and manual registry links.
-     * Centralized here to ensure all domain modules are automatically scraped.
+     * OBSERVABILITY PLANE:
+     * Manual Prometheus registry for high-fidelity SLIs collection.
      */
     MonitoringModule,
 
     /**
-     * RATE LIMITING ENGINE (ANTI-DoS STRATEGY):
-     * Protects the underlying infrastructure from resource exhaustion attacks.
-     * @standard_flow: Optimized for high-throughput mobile/web clients.
-     * @critical_auth: Mitigates brute-force and credential stuffing.
+     * RELIABILITY & CLOUD-NATIVE DIAGNOSTICS:
+     * Orchestrates Liveness/Readiness probes and Stress testing simulation.
+     * Essential for Kubernetes pod lifecycle management.
+     */
+    InfraModule,
+
+    /**
+     * ANTI-DOS ENGINE:
+     * Distributed rate-limiting to prevent resource starvation.
      */
     ThrottlerModule.forRoot([
       {
         name: 'standard_flow',
-        ttl: 60000,   // 60 Seconds
-        limit: 150,   // Balanced for microservices latency
+        ttl: 60000,   // 1 Minute
+        limit: 150,   
       }, 
       {
         name: 'critical_auth',
         ttl: 60000,   
-        limit: 5,     // Hardened for security-first operations
+        limit: 5,     // Hardened against brute-force attacks
       }
     ]),
 
     /**
-     * DATA PERSISTENCE & BUSINESS DOMAINS:
+     * DATA PERSISTENCE & DOMAIN LOGIC:
      */
     PrismaModule,
     AuthModule,
@@ -80,8 +84,8 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
   ],
   providers: [
     /**
-     * LAYER 1: NETWORK RESILIENCE
-     * Guards the application boundary against traffic spikes.
+     * LAYER 1: TRAFFIC SHAPING
+     * Immediate rejection of non-compliant traffic patterns.
      */
     {
       provide: APP_GUARD,
@@ -89,9 +93,8 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
     },
 
     /**
-     * LAYER 2: IDENTITY ENFORCEMENT (Zero-Trust)
-     * Ensures all requests are authenticated by default.
-     * Uses 'Reflector' to allow @Public() overrides where necessary.
+     * LAYER 2: IDENTITY VERIFICATION (Zero-Trust)
+     * Mandatory JWT validation across the entire API surface.
      */
     {
       provide: APP_GUARD,
@@ -99,8 +102,8 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
     },
 
     /**
-     * LAYER 3: PBAC AUTHORIZATION
-     * Evaluates fine-grained permissions after identity is established.
+     * LAYER 3: AUTHORIZATION (PBAC)
+     * Fine-grained permission evaluation for secure resource access.
      */
     {
       provide: APP_GUARD,
@@ -108,8 +111,8 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
     },
 
     /**
-     * PIPELINE 1: FORENSIC AUDITING
-     * Non-blocking capture of state changes for regulatory compliance.
+     * PIPELINE 1: FORENSIC TELEMETRY
+     * Captures audit trails for security compliance and state changes.
      */
     {
       provide: APP_INTERCEPTOR,
@@ -117,9 +120,9 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
     },
 
     /**
-     * PIPELINE 2: TELEMETRY ENGINE
-     * Captures SLIs (Service Level Indicators) for the KEDA Autoscaler.
-     * This is the technical core of the thesis evaluation phase.
+     * PIPELINE 2: PERFORMANCE TELEMETRY
+     * Real-time metrics injection for Prometheus/KEDA orchestration.
+     * Strategically placed last to measure cumulative execution latency.
      */
     {
       provide: APP_INTERCEPTOR,
