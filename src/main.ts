@@ -1,154 +1,105 @@
 /**
  * ============================================================================
- * ZENITH SECURE KERNEL - ENTERPRISE BOOTSTRAP PROTOCOL
+ * ZENITH SECURE KERNEL - ENTERPRISE BOOTSTRAP PROTOCOL v7.3.0
  * ============================================================================
  * @module Main
  * @description Orchestrates the ignition of the high-availability security engine.
- * * ARCHITECTURAL DESIGN (BIG-TECH STANDARDS):
- * 1. RESILIENCE: Graceful shutdown hooks for Zero-Downtime deployments in K8s.
- * 2. SECURITY: Hardened Helmet configuration and strict CORS resource isolation.
- * 3. VALIDATION: Fail-fast validation strategy to optimize CPU cycles for scaling.
- * 4. TRACEABILITY: Integrated Winston logger for forensic system audits.
+ * * * ARCHITECTURAL DESIGN (BIG-TECH STANDARDS):
+ * 1. ZERO-WARNING ROUTING: Explicit path mapping using named parameters for path-to-regexp v8.
+ * 2. HIGH-PERFORMANCE LOGGING: Pino JSON streams for low-latency observability.
+ * 3. K8S DRAIN PROTOCOL: Advanced Graceful Shutdown for predictive scaling stability.
+ * 4. FAIL-FAST VALIDATION: Synchronous input sanitization to preserve CPU cycles.
  * * @author Radouane Djoudi
- * @version 7.0.0
+ * @version 7.3.0 (Zero-Warning / Production-Ready)
  * ============================================================================
  */
 
-import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, RequestMethod, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
 import helmet from 'helmet';
-import { WinstonModule } from 'nest-winston';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 
-/* --- INFRASTRUCTURE INTEGRATION --- */
+/* --- INFRASTRUCTURE FILTERS --- */
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { SecurityBreachFilter } from './common/filters/security-breach.filter';
-import { winstonConfig } from './common/logger/winston.config';
 
 async function bootstrap(): Promise<void> {
   /**
    * INITIALIZATION:
-   * Booting with Winston for high-fidelity traceability.
-   * Internal Nest logger is replaced by Winston to ensure centralized log formatting.
+   * Booting with Pino for high-velocity structured logging. 
+   * BufferLogs ensures early startup logs aren't lost before Pino is ready.
    */
   const app = await NestFactory.create(AppModule, {
-    logger: WinstonModule.createLogger(winstonConfig),
-    cors: false, // Managed explicitly below
+    bufferLogs: true, 
+    cors: false, 
   });
 
+  app.useLogger(app.get(PinoLogger));
   const logger = new Logger('ZENITH_BOOTSTRAP');
   const port = process.env.PORT || 3000;
 
   /**
-   * SECTION 1: SECURITY PERIMETER (HELMET)
-   * Enforces strict HTTP headers to mitigate XSS, Clickjacking, and Sniffing.
-   * Strategy: Standardize security posture across all pods.
+   * SECTION 1: SECURITY & THROUGHPUT
+   * Helmet secures headers; Compression optimizes payload delivery.
    */
   app.use(helmet({
     contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
     crossOriginEmbedderPolicy: true,
   }));
-
-  /**
-   * SECTION 2: THROUGHPUT OPTIMIZATION
-   * Compresses HTTP payloads to maximize bandwidth efficiency. 
-   * Vital for 'Scaling' experiments (RQ2) to reduce network I/O latency.
-   */
   app.use(compression());
 
-  /**
-   * SECTION 3: CORS - IDENTITY-BASED RESOURCE ISOLATION
-   * Prevents unauthorized cross-domain telemetry leakage.
-   */
   app.enableCors({
     origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173', 'http://localhost:3000'],
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'],
     credentials: true,
-    exposedHeaders: ['Authorization', 'X-Trace-ID', 'X-Tenant-ID'], 
+    exposedHeaders: ['Authorization', 'X-Trace-ID'], 
   });
 
   /**
-   * SECTION 4: ARCHITECTURAL VERSIONING (SemVer)
-   * URI-based versioning (e.g., /api/v1/...) enables non-breaking rolling updates.
+   * SECTION 2: MODERN ROUTING
+   * [FIX]: Explicit exclusion of root and named parameters to satisfy path-to-regexp v8.
    */
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: '/', method: RequestMethod.GET }], 
+  });
+
   app.enableVersioning({
     type: VersioningType.URI,
     defaultVersion: '1',
   });
 
-  /**
-   * SECTION 5: GLOBAL EXCEPTION FILTERS
-   * Standardizes the system's "Failure Domain".
-   * This ensures the telemetry engine receives consistent error signals.
-   */
-  app.useGlobalFilters(
-    new HttpExceptionFilter(),    
-    new SecurityBreachFilter(),   
-  );
+  app.useGlobalFilters(new HttpExceptionFilter(), new SecurityBreachFilter());
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,               
+    forbidNonWhitelisted: true,    
+    transform: true,               
+    transformOptions: { enableImplicitConversion: true },
+    disableErrorMessages: process.env.NODE_ENV === 'production',
+  }));
 
   /**
-   * SECTION 6: RESOURCE-EFFICIENT VALIDATION (Fail-Fast)
-   * Strategy: Reject malformed payloads early to preserve RAM/CPU for legitimate processing.
-   */
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,               
-      forbidNonWhitelisted: true,    
-      transform: true,               
-      transformOptions: { enableImplicitConversion: true },
-      disableErrorMessages: process.env.NODE_ENV === 'production',
-    }),
-  );
-
-  /**
-   * SECTION 7: API BLUEPRINT & INFRAISTRY REGISTRY
+   * SECTION 3: DOCUMENTATION
    */
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()
       .setTitle('Zenith Secure Engine | System Registry')
-      .setDescription(
-        'Enterprise IAM & Distributed Systems Kernel.\n\n' +
-        '**Status:** Predictive Autoscaling Ready (KEDA/Prometheus Optimized).'
-      )
-      .setVersion('7.0.0')
-      .setContact('Radouane Djoudi', 'https://github.com/radouanedjoudi', 'admin@zenith-systems.dz')
-      .addBearerAuth(
-        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', name: 'Authorization', in: 'header' }, 
-        'JWT-auth' 
-      )
+      .setDescription('Enterprise IAM & Distributed Systems Kernel.')
+      .setVersion('7.3.0')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'JWT-auth')
       .build();
-
     const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('docs', app, document, {
-      swaggerOptions: { persistAuthorization: true, displayRequestDuration: true },
-      customSiteTitle: 'Zenith Docs | Infrastructure Intelligence',
-    });
+    SwaggerModule.setup('docs', app, document, { customSiteTitle: 'Zenith Docs' });
   }
 
-  /**
-   * SECTION 8: LIFECYCLE & K8s COMPLIANCE
-   * Enables shutdown hooks to allow the pod to drain active requests 
-   * during horizontal scale-down events (Autoscaling).
-   */
   app.enableShutdownHooks();
-
-  /**
-   * KERNEL IGNITION
-   */
   await app.listen(port);
-  
-  logger.log(`\x1b[32m🚀 [KERNEL] Zenith Engine v7.0 operational on port: ${port}\x1b[0m`);
-  logger.log(`\x1b[34m🛡️ [INFRA] Predictive Monitoring & Resource Guard active.\x1b[0m`);
+  logger.log(`🚀 [KERNEL] Zenith Engine v7.3.0 operational on port: ${port}`);
 }
 
-/**
- * GLOBAL PANIC RECOVERY PROTOCOL
- */
 bootstrap().catch((err) => {
-  const panicLogger = new Logger('ZENITH_PANIC');
-  panicLogger.error('❌ CRITICAL: Kernel ignition failed', err.stack);
+  new Logger('ZENITH_PANIC').error('❌ CRITICAL: Kernel failed', err.stack);
   process.exit(1);
 });

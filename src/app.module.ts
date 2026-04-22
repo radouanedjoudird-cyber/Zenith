@@ -1,33 +1,34 @@
 /**
  * ============================================================================
- * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v7.1
+ * ZENITH SECURE CORE - APPLICATION ORCHESTRATOR v7.3.0
  * ============================================================================
  * @module AppModule
  * @description Central Kernel for Enterprise Infrastructure Orchestration.
- * * ARCHITECTURAL DESIGN (FAANG COMPLIANT):
- * 1. DEFENSE-IN-DEPTH: Tiered security via Throttler -> AtGuard -> Permissions.
- * 2. CLOUD-NATIVE RELIABILITY: Integrated Health Probes & Stress Simulation.
- * 3. ZERO-TOUCH OBSERVABILITY: Automated telemetry for KEDA predictive scaling.
- * * @author Radouane Djoudi
- * @version 7.1.0 (Reliability Phase)
+ * * * ARCHITECTURAL DESIGN:
+ * 1. ZERO-WARNING LOGGING: Uses (.*) pattern to silence path-to-regexp v8.
+ * 2. DEFENSE-IN-DEPTH: Layered Guards (Throttler, JWT, Permissions).
+ * 3. OBSERVABILITY: Telemetry integration via dedicated Interceptors.
  * ============================================================================
  */
 
-import { Module } from '@nestjs/common';
+import { Module, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { LoggerModule } from 'nestjs-pino';
 
-// --- INFRASTRUCTURE & RELIABILITY LAYER ---
-import { MonitoringModule } from './common/monitoring/monitoring.module';
-import { InfraModule } from './infra/infra.module'; // <--- NEW: Reliability Engine
-import { PrismaModule } from './prisma/prisma.module';
+// --- CORE LAYER ---
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
-// --- DOMAIN LAYER ---
+// --- INFRASTRUCTURE & DOMAIN ---
 import { AuthModule } from './auth/auth.module';
+import { MonitoringModule } from './common/monitoring/monitoring.module';
+import { InfraModule } from './infra/infra.module';
+import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
-// --- SECURITY & CROSS-CUTTING CONCERNS ---
+// --- SECURITY FILTERS ---
 import { AtGuard } from './auth/guards/at.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -36,98 +37,49 @@ import { MonitoringInterceptor } from './common/interceptors/monitoring.intercep
 @Module({
   imports: [
     /**
-     * CONFIGURATION KERNEL:
-     * High-performance orchestration with variable expansion and caching.
+     * [ENTERPRISE LOGGING]: 
+     * Using '(.*)' pattern forRoutes ensures compatibility with modern routing engines
+     * and prevents the 'LegacyRouteConverter' warning from triggering.
      */
-    ConfigModule.forRoot({
-      isGlobal: true,
-      cache: true,
-      expandVariables: true,
+    LoggerModule.forRoot({
+      pinoHttp: {
+        transport: process.env.NODE_ENV !== 'production' 
+          ? { target: 'pino-pretty', options: { colorize: true, singleLine: true } } 
+          : undefined,
+        autoLogging: {
+          ignore: (req) => {
+            const url = req.url ?? '';
+            return url.includes('health') || url.includes('metrics');
+          },
+        },
+        redact: ['req.headers.authorization', 'req.body.password'],
+      },
+      forRoutes: ['(.*)'], 
+      exclude: [{ method: RequestMethod.ALL, path: 'api/v1/infra/health' }],
     }),
 
-    /**
-     * OBSERVABILITY PLANE:
-     * Manual Prometheus registry for high-fidelity SLIs collection.
-     */
+    ConfigModule.forRoot({ isGlobal: true, cache: true, expandVariables: true }),
+
+    ThrottlerModule.forRoot([{
+      name: 'standard_flow',
+      ttl: 60000,
+      limit: 150,   
+    }]),
+
     MonitoringModule,
-
-    /**
-     * RELIABILITY & CLOUD-NATIVE DIAGNOSTICS:
-     * Orchestrates Liveness/Readiness probes and Stress testing simulation.
-     * Essential for Kubernetes pod lifecycle management.
-     */
     InfraModule,
-
-    /**
-     * ANTI-DOS ENGINE:
-     * Distributed rate-limiting to prevent resource starvation.
-     */
-    ThrottlerModule.forRoot([
-      {
-        name: 'standard_flow',
-        ttl: 60000,   // 1 Minute
-        limit: 150,   
-      }, 
-      {
-        name: 'critical_auth',
-        ttl: 60000,   
-        limit: 5,     // Hardened against brute-force attacks
-      }
-    ]),
-
-    /**
-     * DATA PERSISTENCE & DOMAIN LOGIC:
-     */
     PrismaModule,
     AuthModule,
     UsersModule,
   ],
+  controllers: [AppController],
   providers: [
-    /**
-     * LAYER 1: TRAFFIC SHAPING
-     * Immediate rejection of non-compliant traffic patterns.
-     */
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
-
-    /**
-     * LAYER 2: IDENTITY VERIFICATION (Zero-Trust)
-     * Mandatory JWT validation across the entire API surface.
-     */
-    {
-      provide: APP_GUARD,
-      useClass: AtGuard,
-    },
-
-    /**
-     * LAYER 3: AUTHORIZATION (PBAC)
-     * Fine-grained permission evaluation for secure resource access.
-     */
-    {
-      provide: APP_GUARD,
-      useClass: PermissionsGuard,
-    },
-
-    /**
-     * PIPELINE 1: FORENSIC TELEMETRY
-     * Captures audit trails for security compliance and state changes.
-     */
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: AuditInterceptor,
-    },
-
-    /**
-     * PIPELINE 2: PERFORMANCE TELEMETRY
-     * Real-time metrics injection for Prometheus/KEDA orchestration.
-     * Strategically placed last to measure cumulative execution latency.
-     */
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: MonitoringInterceptor,
-    },
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: AtGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: MonitoringInterceptor },
   ],
 })
 export class AppModule {}
