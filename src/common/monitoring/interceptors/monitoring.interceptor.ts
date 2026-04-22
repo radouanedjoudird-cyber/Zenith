@@ -1,26 +1,26 @@
 /**
  * ============================================================================
- * ZENITH CORE - HIGH-FIDELITY MONITORING INTERCEPTOR
+ * ZENITH CORE - HIGH-FIDELITY MONITORING INTERCEPTOR v7.2.2
  * ============================================================================
  * @class MonitoringInterceptor
- * @description Automated Telemetry Collection Engine using AOP (Aspect-Oriented Programming).
+ * @description Automated Telemetry Collection Engine using AOP.
  * * DESIGN RATIONALE (ENTERPRISE GRADE):
- * 1. ATOMICITY: Ensures Gauge increments are always balanced with decrements using 'finalize'.
- * 2. DIMENSIONALITY: Rich labeling (method, route, status, tenant) for deep-dive PromQL queries.
- * 3. ERROR_CLASSIFICATION: Maps HTTP exceptions to error counters before they are sanitized.
- * 4. PERFORMANCE: Minimal overhead by using direct 'prom-client' references.
+ * 1. CARDINALITY CONTROL: Uses Route Patterns instead of raw URLs to prevent Prometheus explosion.
+ * 2. MODERN ROUTING: Compliant with path-to-regexp v8+ (Eliminates LegacyRouteConverter warnings).
+ * 3. ATOMICITY: Finalize-guaranteed Gauge balancing.
+ * 4. MULTI-TENANCY: Dimensional labeling by tenant_id for granular SLIs.
  * * @author Radouane Djoudi
- * @version 1.0.0
+ * @version 7.2.2 (Cardinality & Routing Optimized)
  * ============================================================================
  */
 
 import {
-    CallHandler,
-    ExecutionContext,
-    HttpException,
-    HttpStatus,
-    Injectable,
-    NestInterceptor,
+  CallHandler,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NestInterceptor,
 } from '@nestjs/common';
 import { InjectMetric } from '@willsoto/nestjs-prometheus';
 import { Counter, Gauge, Histogram } from 'prom-client';
@@ -37,58 +37,47 @@ export class MonitoringInterceptor implements NestInterceptor {
     @InjectMetric(METRICS_NAMES.HTTP_ACTIVE_REQUESTS)
     private readonly activeRequests: Gauge<string>,
 
-    /**
-     * @metric zenith_api_errors_total
-     * Custom Counter injected to track failure rates across the cluster.
-     */
     @InjectMetric('zenith_api_errors_total')
     private readonly errorCounter: Counter<string>,
   ) {}
 
-  /**
-   * @method intercept
-   * @description Wraps the request/response lifecycle to inject telemetry logic.
-   */
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    // 1. Context Validation: Ensure we only monitor HTTP traffic (Bypass WebSockets/Microservices if needed)
     if (context.getType() !== 'http') {
       return next.handle();
     }
 
     const request = context.switchToHttp().getRequest();
-    const { method, url } = request;
+    const response = context.switchToHttp().getResponse();
+    const { method } = request;
+
+    /**
+     * [CRITICAL FIX]: MODERN ROUTE RESOLUTION
+     * We use request.route.path (the pattern like /users/:id) instead of request.url.
+     * This prevents the "LegacyRouteConverter" warning and keeps Prometheus metrics clean.
+     * Fallback to 'unknown_route' if the route is not yet matched (e.g., 404s).
+     */
+    const route = request.route?.path || request.url || 'unknown_route';
     
     /**
-     * EXTRACT_METADATA:
-     * Extracting 'tenant_id' for Multi-tenant resource accounting.
-     * Fallback to 'system_kernel' for internal or unauthenticated probes.
+     * MULTI-TENANT CONTEXT:
      */
     const tenantId = request.headers['x-tenant-id'] || 'system_kernel';
 
-    // 2. INITIALIZATION: Start the high-resolution timer and increment occupancy gauge
+    // Start timer with clean labels
     const stopTimer = this.responseTime.startTimer({ 
       method, 
-      route: url, 
+      route, 
       tenant_id: tenantId 
     });
     
     this.activeRequests.inc({ tenant_id: tenantId });
 
     return next.handle().pipe(
-      /**
-       * SUCCESS_PATH:
-       * Capturing metrics for 2xx and 3xx responses.
-       */
       tap(() => {
-        const response = context.switchToHttp().getResponse();
+        // Success path: Recording duration with standardized status code
         stopTimer({ status_code: response.statusCode.toString() });
       }),
 
-      /**
-       * EXCEPTION_PATH:
-       * Capturing metrics for 4xx and 5xx errors.
-       * Logic: Extracts status from HttpException or defaults to 500 (Internal Server Error).
-       */
       catchError((error) => {
         const statusCode = error instanceof HttpException 
           ? error.getStatus() 
@@ -96,7 +85,7 @@ export class MonitoringInterceptor implements NestInterceptor {
 
         this.errorCounter.inc({ 
           method, 
-          route: url, 
+          route, 
           error_code: statusCode.toString(), 
           tenant_id: tenantId 
         });
@@ -105,12 +94,8 @@ export class MonitoringInterceptor implements NestInterceptor {
         return throwError(() => error);
       }),
 
-      /**
-       * FINALIZE:
-       * Guaranteed execution (like 'finally' in JS).
-       * Ensures 'active_requests' gauge is decremented even if the stream is cancelled or crashes.
-       */
       finalize(() => {
+        // Ensuring Resource Quota is released
         this.activeRequests.dec({ tenant_id: tenantId });
       }),
     );
