@@ -1,40 +1,43 @@
+/**
+ * ============================================================================
+ * ZENITH CORE OPERATIONAL LOGIC
+ * ============================================================================
+ * @module AppService
+ * @version 7.4.0
+ * @description Provides high-speed system telemetry and core utility logic.
+ * * * ARCHITECTURAL RATIONALE:
+ * 1. STATE_IMMUTABILITY: Returns standardized system snapshots for monitoring.
+ * 2. TELEMETRY_PRECISION: High-resolution timestamps for latency/drift analysis.
+ * ============================================================================
+ */
+
 import { Injectable, Logger } from '@nestjs/common';
 
-/**
- * ZENITH APP SERVICE - CORE OPERATIONAL LOGIC v7.3.0
- * ------------------------------------------------
- * @author Radouane Djoudi
- * @project Zenith Secure Engine
- * * * ARCHITECTURAL ROLE:
- * Provides core application-level utility and system health telemetry.
- * * * SECURITY STRATEGY:
- * 1. CENTRALIZED_LOGGING: Monitors service availability via internal audit logs.
- * 2. MINIMALIST_LEAKAGE: Prevents version exposure while providing vital state.
- */
 @Injectable()
 export class AppService {
-  private readonly logger = new Logger('Zenith-App-Service');
+  private readonly logger = new Logger('ZENITH_APP_SERVICE');
 
   /**
-   * GET_SYSTEM_STATUS
-   * -----------------
-   * Serves as a neutral, high-speed endpoint for load balancers and uptime monitors.
-   * COMPLIANCE: Adheres to structured telemetry standards for JSON logging.
-   * * @returns {object} Standardized operational status.
+   * @function getSystemStatus
+   * @description Aggregates core system metadata for infrastructure heartbeat.
+   * @compliance ISO-27001 Standardized Telemetry
+   * @returns {object} Operational status snapshot.
    */
   getSystemStatus(): object {
     /**
-     * TELEMETRY:
-     * Structured log entry to track infrastructure health probes frequency.
+     * @audit_log
+     * Track incoming health probes for infrastructure reliability metrics.
      */
-    this.logger.log('🛡️ [HEALTH_CHECK] Root gateway reached. Status: OPERATIONAL');
-    
+    this.logger.log('📊 [TELEMETRY] System health snapshot generated.');
+
     return {
       status: 'active',
       engine: 'Zenith Secure Engine',
-      kernel: 'v7.3.0',
+      kernel: 'v7.4.0',
       telemetry: 'engaged',
-      timestamp: new Date().toISOString(), // Vital for latency analysis
+      environment: process.env.NODE_ENV || 'development',
+      uptime: process.uptime().toFixed(2) + 's', 
+      timestamp: new Date().toISOString(),
     };
   }
 }
