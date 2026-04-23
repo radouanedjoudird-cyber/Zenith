@@ -1,34 +1,44 @@
 /**
  * ============================================================================
- * ZENITH INFRASTRUCTURE KERNEL - RELIABILITY & DIAGNOSTICS v1.2
+ * ZENITH SECURE KERNEL - INFRASTRUCTURE & RELIABILITY MODULE
  * ============================================================================
  * @module InfraController
- * @description Mission-critical telemetry and system reliability endpoints.
- * * * ARCHITECTURAL DESIGN (ENTERPRISE GRADE):
- * 1. SIDE-CAR ISOLATION: Separates infrastructure diagnostics from domain logic.
- * 2. K8S NATIVE PROBES: Full compatibility with Liveness/Readiness lifecycle.
- * 3. CONTROLLED RESOURCE SATURATION: Instrumented load for KEDA/HPA benchmarking.
- * * * SECURITY STRATEGY:
- * - Publicly exposed for internal cluster orchestration. 
- * - Network-level isolation is prioritized over application-level JWTs for probes.
- * * @author Radouane Djoudi
- * @version 1.2.0 (Public Load Simulation Enabled)
+ * @description Mission-critical telemetry, diagnostics, and system probes.
+ * * ARCHITECTURAL COMPLIANCE:
+ * 1. RBAC_ENFORCEMENT: Stress-testing vectors are gated via Role-Based Access Control.
+ * 2. CLOUD_NATIVE_READY: Implements Liveness/Readiness patterns for K8s/Docker.
+ * 3. SATURATION_LIMITER: Hard-capped execution cycles to prevent resource exhaustion.
  * ============================================================================
  */
 
-import { Controller, Get, Query } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
-    HealthCheck,
-    HealthCheckService,
-    PrismaHealthIndicator
-} from '@nestjs/terminus';
+  Controller,
+  Get,
+  Logger,
+  Query,
+  UseGuards,
+  UseInterceptors
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { HealthCheck, HealthCheckService, PrismaHealthIndicator } from '@nestjs/terminus';
+
+/* --- SECURITY SCHEMAS (Corrected Paths Based on Project Tree) --- */
+import { AtGuard } from '../auth/guards/at.guard'; // Corrected: Using AtGuard instead of JwtAuthGuard
 import { Public } from '../common/decorators/public.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '../common/enums/role.enum';
+import { RolesGuard } from '../common/guards/roles.guard'; // Corrected: RolesGuard is in common/guards
+
+/* --- INSTRUMENTATION & SERVICES --- */
+import { MonitoringInterceptor } from '../common/interceptors/monitoring.interceptor';
 import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('Infrastructure & Reliability')
 @Controller('infra')
+@UseInterceptors(MonitoringInterceptor)
 export class InfraController {
+  private readonly logger = new Logger('ZENITH_INFRA_ENGINE');
+
   constructor(
     private readonly health: HealthCheckService,
     private readonly prismaHealth: PrismaHealthIndicator,
@@ -36,69 +46,85 @@ export class InfraController {
   ) {}
 
   /**
-   * CLOUD-NATIVE HEALTH ORCHESTRATION
    * @endpoint GET /api/v1/infra/health
-   * @description Standardized probe for Kubernetes to monitor pod viability.
+   * @access Public (Whitelisted for Orchestrator Probes)
+   * @description Standardized health check for Kubernetes liveness/readiness probes.
    */
   @Public()
   @Get('health')
   @HealthCheck()
   @ApiOperation({ 
-    summary: 'System Liveness & Readiness Probe',
-    description: 'Validates core kernel stability and database persistence availability.' 
+    summary: 'System Liveness Probe',
+    description: 'Critical check for database persistence and kernel stability.' 
   })
-  @ApiResponse({ status: 200, description: 'System is operational.' })
-  @ApiResponse({ status: 503, description: 'System or downstream service is unhealthy.' })
-  check() {
+  @ApiResponse({ status: 200, description: 'Core services operational.' })
+  @ApiResponse({ status: 503, description: 'Service degradation detected.' })
+  async check() {
     return this.health.check([
       /**
-       * DATABASE PERSISTENCE CHECK:
-       * Verifies the Prisma engine can execute a ping to the data registry.
+       * PERSISTENCE_LAYER_VALIDATION:
+       * Ensures the Prisma ORM maintains a healthy heartbeat with the registry.
        */
       () => this.prismaHealth.pingCheck('database', this.prisma),
     ]);
   }
 
   /**
-   * COMPUTATIONAL STRESS SIMULATOR (BENCHMARKING TOOL)
    * @endpoint GET /api/v1/infra/stress
-   * @description Controlled CPU load generation for Predictive Autoscaling research.
-   * * [BEST PRACTICE]: Marked as @Public() to allow unhindered access for internal 
-   * telemetry scripts (e.g., k6, Artillery). Security is enforced via NetworkPolicies.
+   * @access Restricted (Admin Only)
+   * @description Generates controlled CPU saturation for autoscaling verification.
    */
-  @Public() 
   @Get('stress')
+  @UseGuards(AtGuard, RolesGuard) // Changed to AtGuard as per your project structure
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ 
-    summary: 'Synthetic Resource Saturation Engine',
-    description: 'Intentionally inflates CPU cycles to trigger and test scaling thresholds.' 
+    summary: 'Resource Saturation Simulation',
+    description: 'Authorized stress testing for benchmarking P99 latency and scaling triggers.' 
   })
-  @ApiQuery({ name: 'cycles', required: false, type: Number, example: 100000000 })
-  async simulateLoad(@Query('cycles') cycles: number = 100000000) {
+  @ApiQuery({ name: 'cycles', type: Number, required: false, example: 100000000 })
+  @ApiResponse({ status: 200, description: 'Workload execution successful.' })
+  @ApiResponse({ status: 403, description: 'Privileged access required.' })
+  async simulateLoad(@Query('cycles') cycles: any = 100000000) {
+    
+    /**
+     * DEFENSIVE_PROGRAMMING:
+     * Enforce a hard cap (MAX_CYCLES) to prevent unintentional self-inflicted DoS.
+     */
+    const parsedCycles = isNaN(Number(cycles)) ? 100000000 : Number(cycles);
+    const MAX_CYCLES = 500000000;
+    const targetCycles = Math.min(parsedCycles, MAX_CYCLES);
+
+    if (process.env.NODE_ENV === 'production') {
+      this.logger.warn(`[AUDIT_LOG] Stress execution triggered by Admin in PRODUCTION environment.`);
+    }
+
     const start = Date.now();
     
     /**
-     * WORKLOAD EMULATION:
-     * High-frequency mathematical iterations to engage the CPU and increase 
-     * P99 latency metrics within the Prometheus registry.
+     * COMPUTE_INTENSIVE_WORKLOAD:
+     * Synthetic iterations designed to increase CPU utilization, 
+     * reflected in Prometheus through the MonitoringInterceptor.
      */
     let result = 0;
-    for (let i = 0; i < Number(cycles); i++) {
+    for (let i = 0; i < targetCycles; i++) {
       result += Math.sqrt(Math.random() * Math.random());
     }
 
     const duration = Date.now() - start;
 
     return {
-      status: 'Operation Successful',
+      status: 'Execution Finalized',
       metadata: {
-        engine: 'Zenith-Stress-v1',
-        executionTimeMs: duration,
-        processedCycles: Number(cycles),
+        engine: 'Zenith-Kernel-Stress-v1',
+        latencyMs: duration,
+        processedCycles: targetCycles,
+        protectionCapped: targetCycles < parsedCycles,
         timestamp: new Date().toISOString()
       },
       telemetry: {
-        impact: 'High CPU Saturation',
-        action: 'Metrics dispatched to Prometheus registry.'
+        dispatched: true,
+        registry: 'Prometheus-Default'
       }
     };
   }

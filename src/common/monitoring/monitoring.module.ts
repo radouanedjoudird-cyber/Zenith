@@ -1,50 +1,58 @@
 /**
  * ============================================================================
- * ZENITH CORE INFRASTRUCTURE - OBSERVABILITY ENGINE
+ * ZENITH SECURE KERNEL - INFRASTRUCTURE TELEMETRY MODULE v7.4.0
  * ============================================================================
  * @module MonitoringModule
- * @description Manual Prometheus Integration & Global Telemetry Orchestration.
- * * DESIGN RATIONALE (FAANG STANDARDS):
- * 1. DECOUPLED_ARCHITECTURE: Zero dependency on faulty library internal routers.
- * 2. GLOBAL_INTERCEPTION: Automatically attaches MonitoringInterceptor to all 
- * system routes for 100% traffic visibility.
- * 3. REGISTRY_HYGIENE: Mandatory 'register.clear()' to ensure idempotent 
- * behavior during Hot Module Replacement (HMR).
- * 4. PERFORMANCE_ISOLATION: Minimal overhead collection logic to ensure zero 
- * impact on P99 latency.
- * * @author Radouane Djoudi
- * @version 15.0.0
- * @status PRODUCTION_STABLE
+ * @description Central Hub for Kernel-level observability and Prometheus exports.
+ * * DESIGN PRINCIPLES:
+ * 1. SINGLETON_REGISTRY: Enforces a unified registry to prevent metric collisions.
+ * 2. IDEMPOTENT_INITIALIZATION: Prevents registry clearing on HMR cycles.
+ * 3. GLOBAL_SCOPE: Universal availability of monitoring services.
  * ============================================================================
  */
 
-import { Controller, Get, Global, Logger, Module, OnModuleInit, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Global,
+  Logger,
+  Module,
+  OnModuleInit,
+  Res,
+  VERSION_NEUTRAL
+} from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { collectDefaultMetrics, register } from 'prom-client';
+
 import { Public } from '../decorators/public.decorator';
-import { MonitoringInterceptor } from './interceptors/monitoring.interceptor';
-import { prometheusProviders } from './metrics/metrics.providers';
+import { MonitoringInterceptor } from '../interceptors/monitoring.interceptor';
+import { MonitoringService } from './monitoring.service';
 
 /**
  * @class CustomMetricsController
- * @description Standardized Prometheus scrape target.
- * Exposes internal telemetry to the Prometheus scraper (typically port 9090).
+ * @description High-availability telemetry scraper interface.
  */
-@Controller('metrics')
+@ApiTags('Infrastructure & Telemetry')
+@Controller({ 
+  path: '', 
+  version: VERSION_NEUTRAL 
+})
 export class CustomMetricsController {
-  private readonly logger = new Logger('ZENITH_MONITORING');
+  private readonly logger = new Logger('ZENITH_METRICS');
 
   @Public()
-  @Get()
-  async index(@Res() res: Response): Promise<void> {
+  @Get('metrics')
+  @ApiOperation({ summary: 'Prometheus Scrape Point' })
+  @ApiResponse({ status: 200, description: 'Metrics stream synchronized.' })
+  async index(@Res() res: Response) {
     try {
-      const metrics = await register.metrics();
-      res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-      res.status(200).send(metrics);
+      res.set('Content-Type', register.contentType);
+      res.end(await register.metrics());
     } catch (error) {
-      this.logger.error(`[TELEMETRY_PANIC] Aggregation failure: ${error.message}`);
-      res.status(500).send('Infrastructure Telemetry Offline');
+      this.logger.error(`[SCRAPE_ERROR] Failed to export metrics: ${error.message}`);
+      res.status(500).send('Telemetry synchronization failed');
     }
   }
 }
@@ -53,44 +61,42 @@ export class CustomMetricsController {
 @Module({
   controllers: [CustomMetricsController],
   providers: [
-    ...prometheusProviders,
+    MonitoringService,
     /**
-     * GLOBAL_TELEMETRY_INTERCEPTOR:
-     * We register the interceptor here using the APP_INTERCEPTOR token.
-     * This ensures that EVERY request to the API is tracked without 
-     * needing to add @UseInterceptors() to every controller.
+     * [INTERCEPTOR_REGISTRATION]:
+     * Ensuring the MonitoringInterceptor is a singleton and properly injected.
      */
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: MonitoringInterceptor,
+    MonitoringInterceptor,
+    { 
+      provide: APP_INTERCEPTOR, 
+      useExisting: MonitoringInterceptor 
     },
   ],
-  exports: [...prometheusProviders],
+  exports: [MonitoringService],
 })
 export class MonitoringModule implements OnModuleInit {
   private readonly logger = new Logger('Zenith-Infra');
 
-  /**
-   * ON_MODULE_INIT:
-   * Direct link to 'prom-client' for manual metric aggregation.
-   * This bypasses the Reflect.defineMetadata bug in NestJS 11 library wrappers.
-   */
   onModuleInit() {
+    /**
+     * CRITICAL FIX:
+     * We removed 'register.clear()' because it wipes out the metrics 
+     * defined in MonitoringService's constructor during NestJS bootstrap.
+     */
     try {
-      register.clear(); // Prevents "Metric already registered" errors on reload
-      
-      collectDefaultMetrics({
+      // Setup default Node.js runtime metrics (CPU, Memory, Event Loop)
+      collectDefaultMetrics({ 
         prefix: 'zenith_core_',
-        labels: { 
-          service: 'zenith-backend',
-          env: process.env.NODE_ENV || 'development' 
-        },
+        labels: { service: 'zenith-backend' } 
       });
 
-      this.logger.log('🚀 [MONITORING] Telemetry Engine operational via Direct Link.');
-      this.logger.log('🛡️ [MONITORING] Global Interceptor attached to all routes.');
+      this.logger.log('🚀 [TELEMETRY] Global Observability Engine online.');
     } catch (error) {
-      this.logger.error(`[INIT_FAILURE] Monitoring core failed to start: ${error.message}`);
+      /**
+       * Handle cases where metrics are already registered 
+       * (common during Hot Module Replacement in development).
+       */
+      this.logger.warn(`[TELEMETRY_WARN] Runtime metrics already initialized.`);
     }
   }
 }
