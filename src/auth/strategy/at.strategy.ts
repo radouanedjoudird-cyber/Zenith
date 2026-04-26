@@ -1,73 +1,71 @@
+/**
+ * ============================================================================
+ * ZENITH IDENTITY HYDRATION ENGINE - AT STRATEGY
+ * ============================================================================
+ * @module AtStrategy
+ * @version 7.4.0
+ * @description Orchestrates stateless identity resolution and permission injection.
+ * * ARCHITECTURAL RATIONALE:
+ * 1. CRYPTOGRAPHIC_INTEGRITY: Validates Access Tokens using dedicated secrets.
+ * 2. ZERO_LATENCY_AUTHORIZATION: Hydrates req.user with 'perms' for O(1) checks.
+ * 3. IDENTITY_NORMALIZATION: Standardizes subject claims across the micro-kernel.
+ * ============================================================================
+ */
+
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
-/**
- * ZENITH ACCESS TOKEN STRATEGY - IDENTITY HYDRATION ENGINE v2.8
- * -------------------------------------------------------------
- * @author Radouane Djoudi
- * @project Zenith Secure Engine
- * * * ARCHITECTURAL ROLE:
- * Provides high-speed, stateless identity & permission resolution.
- * * * SECURITY DESIGN:
- * 1. FAIL_FAST_INITIALIZATION: Blocks bootup if AT_SECRET is missing.
- * 2. PBAC_HYDRATION: Injects permission claims into req.user for zero-DB-hit authorization.
- * 3. TTL_ENFORCEMENT: Strict 15m expiration to minimize token theft window.
- * 4. ISOLATION_PRINCIPLE: Uses a dedicated AT_SECRET to prevent type-confusion attacks.
- */
 @Injectable()
 export class AtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(config: ConfigService) {
+  constructor(private readonly config: ConfigService) {
     const atSecret = config.get<string>('AT_SECRET');
 
     /**
-     * CORE SECURITY GATE:
-     * If AT_SECRET is null, the entire cryptographic layer is compromised.
-     * We force a kernel panic to prevent starting in an insecure state.
+     * CRITICAL_GATE_CHECK:
+     * Prevention of insecure bootstrap. If AT_SECRET is undefined, 
+     * the system must halt to prevent cryptographic bypass.
      */
     if (!atSecret) {
-      throw new Error('🛡️ ZENITH_CORE_ERROR: AT_SECRET is missing in environment registry.');
+      throw new Error('🛡️ ZENITH_CORE_ERROR: AT_SECRET is not defined in the environment.');
     }
 
     super({
-      // Strategy: Extract from 'Authorization: Bearer <token>'
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      // MANDATORY: Rejects expired tokens immediately at the gate.
-      ignoreExpiration: false, 
-      // Dedicated secret for Access Tokens ONLY.
+      ignoreExpiration: false, // Strict TTL enforcement (typically 15m)
       secretOrKey: atSecret,
     });
   }
 
   /**
-   * IDENTITY HYDRATION LOGIC:
-   * Maps the encrypted JWT payload to the execution context (req.user).
-   * Serves as the "Source of Truth" for PermissionsGuard and @GetCurrentUserId.
-   *
-   * @param payload { sub: number, email: string, role: string, perms: string[] }
+   * @method validate
+   * @description Hydrates the execution context with normalized identity claims.
+   * @param payload { sub: string, email: string, role: string, perms: string[] }
+   * @returns Authorized identity object injected into req.user
    */
   validate(payload: any) {
     /**
-     * STRUCTURAL INTEGRITY SHIELD:
-     * Ensures the token payload contains verified identity and permission claims.
-     * Failure indicates a malformed token or a cross-protocol attack attempt.
+     * MALFORMED_TOKEN_PROTECTION:
+     * Rejects tokens that lack the mandatory 'sub' or 'perms' claims.
+     * This protects against type-confusion and protocol downgrade attacks.
      */
     if (!payload.sub || !payload.perms) {
-      throw new UnauthorizedException('Zenith Shield: Malformed or compromised security context.');
+      throw new UnauthorizedException('ZENITH_SHIELD: Security context integrity failure.');
     }
 
     /**
-     * UNIFIED IDENTITY MAPPING:
-     * Normalizing the identity object for global application compatibility.
-     * Injects 'permissions' for O(1) authorization checks in downstream Guards.
+     * IDENTITY_NORMALIZATION_MAP:
+     * Standardizes the user object for downstream consumers (Guards/Controllers).
+     * Mapping 'perms' from payload to both 'permissions' (legacy) and 'perms' (modern).
      */
     return {
-      sub: payload.sub,           // Legacy standard for subject ID
-      id: payload.sub,            // Modern developer-friendly alias
+      id: payload.sub,            // Modern ID reference
+      sub: payload.sub,           // Standard JWT subject reference
       email: payload.email,
-      role: payload.role,
-      permissions: payload.perms, // PBAC: Granular claims for zero-latency checks
+      role: payload.role,         // Dynamic Role Name (e.g., "ADMIN")
+      perms: payload.perms,       // Modern claim reference used in PermissionsGuard v7
+      permissions: payload.perms, // Legacy alias for backward compatibility
     };
   }
 }

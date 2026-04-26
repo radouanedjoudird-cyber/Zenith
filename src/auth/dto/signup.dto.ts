@@ -1,3 +1,18 @@
+/**
+ * ============================================================================
+ * ZENITH IDENTITY & ACCESS MANAGEMENT - SIGNUP PROTOCOL
+ * ============================================================================
+ * @module SignupDto
+ * @version 7.4.0
+ * @description Data Transfer Object for secure identity provisioning.
+ * * ARCHITECTURAL RATIONALE:
+ * 1. XSS_DEFENSE: Aggressive Regex-based HTML stripping for inbound strings.
+ * 2. NORMALIZATION: Canonical indexing via lowercase & trim transformations.
+ * 3. COMPLEXITY_ENFORCEMENT: MIL-SPEC entropy requirements for passwords.
+ * 4. PRIVILEGE_ISOLATION: Strict exclusion of role fields to block escalation.
+ * ============================================================================
+ */
+
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
@@ -10,68 +25,65 @@ import {
   MinLength
 } from 'class-validator';
 
-/**
- * DATA TRANSFER OBJECT: SIGNUP PROTOCOL (SHIELDED EDITION)
- * --------------------------------------------------------
- * @author Radouane Djoudi
- * @project Zenith Secure Engine
- * * * SECURITY MEASURES:
- * 1. XSS_MITIGATION: High-speed Regex stripping for HTML injection prevention.
- * 2. DATA_NORMALIZATION: Canonical form enforcement (lowercase/trimmed) for DB indexing.
- * 3. CRYPTOGRAPHIC_ENTROPY: Minimum 10-char password with multi-class requirements.
- * 4. PRIVILEGE_ISOLATION: Role field is strictly excluded to prevent unauthorized elevation.
- */
 export class SignupDto {
   
   @ApiProperty({ 
     example: 'Radouane', 
-    description: 'First name of the applicant. Strips HTML tags and leading/trailing spaces.' 
+    description: 'First name of the applicant. Strips HTML and leading/trailing spaces.' 
   })
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
   /**
    * INGRESS SANITIZATION:
-   * Prevents persistent XSS by stripping potential script tags before they reach the DB.
+   * Prevents Persistent XSS by stripping script/HTML tags at the ingress point.
    */
-  @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/<[^>]*>?/gm, '') : value)
+  @Transform(({ value }) => 
+    typeof value === 'string' ? value.trim().replace(/<[^>]*>?/gm, '') : value
+  )
   firstName: string;
 
   @ApiProperty({ 
     example: 'Djoudi', 
-    description: 'Family name of the applicant. Normalized to lowercase for search optimization.' 
+    description: 'Family name of the applicant. Normalized for B-Tree indexing.' 
   })
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
   /**
-   * CANONICAL NORMALIZATION:
-   * Standardizes family names to lowercase to optimize B-Tree indexing and search operations.
+   * DATA NORMALIZATION:
+   * Standardizes family names to maintain consistency in searching and reporting.
    */
-  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase().replace(/<[^>]*>?/gm, '') : value)
+  @Transform(({ value }) => 
+    typeof value === 'string' ? value.trim().replace(/<[^>]*>?/gm, '') : value
+  )
   familyName: string;
 
   @ApiProperty({ 
     example: '+213661234567', 
-    description: 'ITU-T E.164 compliant phone number for Algeria (DZ).' 
+    description: 'ITU-T E.164 compliant phone number (Algeria/DZ).' 
   })
   @IsPhoneNumber('DZ') 
   @IsNotEmpty()
   /**
-   * SPACE STRIPPING:
-   * Cleans internal whitespaces to ensure consistent storage and indexing.
+   * WHITESPACE CLEANING:
+   * Ensures consistent storage by removing all internal spaces from the phone string.
    */
-  @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/\s/g, '') : value)
+  @Transform(({ value }) => 
+    typeof value === 'string' ? value.trim().replace(/\s/g, '') : value
+  )
   phoneNumber: string;
 
   @ApiProperty({ 
     example: 'contact@zenith-systems.dz', 
-    description: 'Unique identifier for authentication. Enforced unique in the Infrastructure layer.' 
+    description: 'Primary unique identity key. Enforced in the persistence layer.' 
   })
-  @IsEmail({}, { message: 'Security Alert: Malformed email structure detected.' })
+  @IsEmail({}, { message: 'SECURITY_ALERT: Malformed email structure detected.' })
   @IsNotEmpty()
   @MaxLength(100)
-  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @Transform(({ value }) => 
+    typeof value === 'string' ? value.trim().toLowerCase() : value
+  )
   email: string;
 
   @ApiProperty({ 
@@ -83,17 +95,17 @@ export class SignupDto {
   @MinLength(10)
   @MaxLength(32)
   /**
-   * MIL-SPEC ENTROPY ENFORCEMENT:
-   * Regex validates for Upper, Lower, Number, and Special character sets to ensure cryptographic strength.
+   * CRYPTOGRAPHIC ENTROPY ENFORCEMENT:
+   * Validates complexity requirements to prevent dictionary and brute-force attacks.
    */
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_#^()])[A-Za-z\d@$!%*?&_#^()]{10,32}$/, {
-    message: 'Security Policy Failure: Password complexity (10-32 chars, mix of types) not met.',
+    message: 'SECURITY_POLICY: Password complexity requirements not met (10-32 chars, diverse sets).',
   })
   password: string;
 
   /**
-   * NOTE ON AUTHORIZATION:
-   * The 'role' field is OMITTED to prevent "Privilege Escalation" attacks during signup.
-   * New accounts are defaulted to 'USER' via the core service logic.
+   * SECURITY ARCHITECTURE NOTE:
+   * The 'role' field is omitted by design. Authorization occurs in the AuthService
+   * using the Dynamic RBAC bootstrap to assign the 'USER' role by default.
    */
 }

@@ -1,10 +1,10 @@
 // -----------------------------------------------------------------------------
-// 🌐 ZENITH PERSISTENCE LAYER - CORE SCHEMA v6.0 (Enterprise Forensic Edition)
+// ZENITH PERSISTENCE LAYER - CORE SCHEMA v7.4.0
 // -----------------------------------------------------------------------------
-// @author Radouane Djoudi
-// @engine MongoDB with ReplicaSet Optimization
-// @security Forensic Fingerprinting & Hardware Identity Mapping
-// @status STABLE_RELEASE
+// @file: schema.prisma
+// @author: Radouane Djoudi
+// @engine: MongoDB with ReplicaSet Optimization
+// @standards: ISO/IEC 27001 | SOC2 Compliance | NIST CSF
 // -----------------------------------------------------------------------------
 
 generator client {
@@ -17,13 +17,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// -----------------------------------------------------------------------------
 // [1] SYSTEM ENUMERATIONS
 // -----------------------------------------------------------------------------
-enum Role {
-  ADMIN
-  SUPER_ADMIN
-  USER
-  MANAGER
+
+enum AccountStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+  FLAGGED
 }
 
 enum LogStatus {
@@ -41,98 +44,141 @@ enum Severity {
   CRITICAL
 }
 
-// [2] IDENTITY MODELS
+// -----------------------------------------------------------------------------
+// [2] IDENTITY & ACCESS MANAGEMENT (IAM)
 // -----------------------------------------------------------------------------
 
+/// @model User
+/// Core identity entity with hardware-bound security telemetry.
 model user {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  
+  /// Global unique identifier for identity
+  email           String        @unique
+  password        String        // Argon2id Hashed
+  firstName       String
+  familyName      String
+  phoneNumber     String        @unique
+  
+  /// SYSTEM_STATE_MANAGEMENT
+  status          AccountStatus @default(ACTIVE)
+  isTwoFactorEnabled Boolean    @default(false)
+  
+  /// DYNAMIC_RBAC_INTEGRATION
+  roleId          String?       @db.ObjectId
+  role            role?         @relation(fields: [roleId], references: [id])
+  
+  /// IDENTITY_RECOVERY_PROTOCOL
+  resetPasswordToken   String?  
+  resetPasswordExpires DateTime? @db.Date
+
+  /// CONCURRENCY_CONTROL
+  version         Int           @default(1)
+
+  createdAt       DateTime      @default(now()) @db.Date
+  updatedAt       DateTime      @updatedAt @db.Date
+
+  // RELATION_HOOKS
+  permissions     userPermission[]
+  sessions        session[]
+
+  @@map("users")
+  @@index([roleId])
+  @@index([status])
+  @@index([resetPasswordToken])
+}
+
+/// @model Role
+model role {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  email       String   @unique
-  password    String
-  firstName   String
-  familyName  String
-  phoneNumber String   @unique
-  role        Role     @default(USER)
+  name        String   @unique 
+  description String?
+  permissions String[] 
+  
+  users       user[]
   createdAt   DateTime @default(now()) @db.Date
   updatedAt   DateTime @updatedAt @db.Date
 
-  // Relation Hooks
-  permissions userPermission[]
-  sessions    session[]
-
-  @@map("users")
-  @@index([role])
+  @@map("roles")
 }
 
+/// @model Session
+/// Distributed session management with hardware fingerprinting.
 model session {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   userId    String   @db.ObjectId
   user      user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
   hashedRt  String   @unique
 
-  // 🛡️ ENTERPRISE FINGERPRINTING FIELDS
-  deviceId  String?  // Unique Hardware/Browser Signature
-  os        String?  // Operating System (e.g., Windows 11, Linux)
-  browser   String?  // Browser Engine (e.g., Chrome 124, Firefox)
-  device    String?  // Device Category (Desktop, Mobile, Tablet)
-  cpuArch   String?  // CPU Architecture (x64, arm64)
+  /// HARDWARE_TELEMETRY_ANCHORING
+  deviceId  String?  
+  os        String?  
+  browser   String?  
+  device    String?  
+  cpuArch   String?  
   
   ipAddress String?
   userAgent String?
+  
+  expiresAt DateTime @db.Date
   createdAt DateTime @default(now()) @db.Date
   updatedAt DateTime @updatedAt @db.Date
 
   @@map("sessions")
   @@index([userId])
-  @@index([deviceId]) // Optimized for session hijacking detection
+  @@index([deviceId])
+  @@index([expiresAt])
 }
 
-// [3] FORENSIC & TELEMETRY MODELS
+// -----------------------------------------------------------------------------
+// [3] FORENSIC AUDIT TELEMETRY
 // -----------------------------------------------------------------------------
 
+/// @model AuditLog
+/// Immutable record of all critical system mutations.
 model auditLog {
-  id        String    @id @default(auto()) @map("_id") @db.ObjectId
-  action    String
-  entity    String
-  entityId  String?   @db.ObjectId
-  userId    String?   @db.ObjectId
-  userEmail String?
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  action      String    // Format: DOMAIN.ACTION (e.g., USER.PASSWORD_CHANGE)
+  entity      String    // Target Domain Object
+  entityId    String?   @db.ObjectId
+  userId      String?   @db.ObjectId
+  userEmail   String?
   
-  // 🛡️ FORENSIC CONTEXT
-  deviceId  String?
-  os        String?
-  browser   String?
-  ipAddress String?
-  userAgent String?
+  /// SECURITY_FORENSICS_CONTEXT
+  /// 🛡️ FIXED: Added missing hardware telemetry vectors
+  deviceId    String?
+  os          String?   // 🛡️ Added to match AuditInterceptor
+  browser     String?   // 🛡️ Added to match AuditInterceptor
+  ipAddress   String?
+  userAgent   String?
 
-  // NETWORK & PROTOCOL
-  method    String?
-  path      String?
+  method      String?
+  path        String?
   
-  // DATA SNAPSHOTS
-  payload   Json?     
-  newData   Json?     
-  oldData   Json?     
-
-  status    LogStatus @default(SUCCESS)
-  severity  Severity  @default(LOW)
-  createdAt DateTime  @default(now()) @db.Date
+  payload     Json?     
+  newData     Json?     
+  
+  status      LogStatus @default(SUCCESS)
+  severity    Severity  @default(LOW)
+  createdAt   DateTime  @default(now()) @db.Date
 
   @@map("audit_logs")
   @@index([userId])
-  @@index([deviceId])
   @@index([action])
   @@index([severity])
   @@index([createdAt])
 }
 
-// [4] GOVERNANCE MODELS
+// -----------------------------------------------------------------------------
+// [4] PERMISSION OVERRIDES (PBAC)
 // -----------------------------------------------------------------------------
 
 model userPermission {
-  id     String @id @default(auto()) @map("_id") @db.ObjectId
-  userId String @db.ObjectId
-  user   user   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  action String
+  id      String @id @default(auto()) @map("_id") @db.ObjectId
+  userId  String @db.ObjectId
+  user    user   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action  String 
 
   @@unique([userId, action])
   @@map("user_permissions")

@@ -1,49 +1,57 @@
+/**
+ * ============================================================================
+ * ZENITH IDENTITY & ACCESS MANAGEMENT - SIGNIN PROTOCOL
+ * ============================================================================
+ * @module SigninDto
+ * @version 7.4.0
+ * @description Data Transfer Object for secure credential challenge.
+ * * ARCHITECTURAL RATIONALE:
+ * 1. ANTI_HARVESTING: Generic messaging to prevent identity enumeration.
+ * 2. CANONICAL_FORMATTING: Lowercase normalization for O(1) B-Tree lookup.
+ * 3. INJECTION_SHIELD: Strict character whitelisting for password buffer.
+ * ============================================================================
+ */
+
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
-/**
- * DATA TRANSFER OBJECT: SIGNIN PROTOCOL (SHIELDED)
- * -----------------------------------------------
- * @author Radouane Djoudi
- * @project Zenith Secure Engine
- * * * SECURITY STRATEGY:
- * 1. ANTI-ENUMERATION: Generic error messaging to mitigate account harvesting.
- * 2. PAYLOAD_NORMALIZATION: Canonical email formatting for high-speed DB index hits.
- * 3. INJECTION_PREVENTION: Strict regex whitelisting on the password stream.
- */
 export class SigninDto {
 
   @ApiProperty({ 
     example: 'admin@zenith-systems.dz', 
-    description: 'Registered identity email. Case-insensitive.' 
+    description: 'Unique identity email. Normalized to lowercase for indexing.' 
   })
   /**
    * CREDENTIAL NORMALIZATION:
-   * Trims and lowercases the input before validation to ensure it matches
-   * the unique index in the 'users' table.
+   * Ensures that whitespace and case-sensitivity issues do not result 
+   * in false-negative authentication failures.
    */
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
-  @IsEmail({}, { message: 'Authentication failed: Invalid credentials.' })
+  @IsEmail({}, { message: 'AUTH_GATE: Credentials validation failed.' })
   @IsNotEmpty()
   @MaxLength(100)
   email: string;
 
   @ApiProperty({ 
     example: 'Znt@2026!Sec', 
-    description: 'Cryptographic password string.' 
+    description: 'Identity secret string (Password).' 
   })
   /**
-   * ENTROPY & INJECTION CONTROL:
-   * Aligned with signup complexity. The regex blocks common SQLi and XSS payloads
-   * by restricting characters to a secure set.
+   * INPUT SECURITY:
+   * Enforces the same character constraints as the Provisioning (Signup) phase
+   * to mitigate injection risks while maintaining cryptographic entropy.
    */
   @IsString()
   @IsNotEmpty()
   @MinLength(10)
   @MaxLength(32)
+  /**
+   * SECURITY POLICY:
+   * Using generic error messages to block account discovery via timing or response delta.
+   */
   @Matches(/^[A-Za-z\d@$!%*?&_#^()]*$/, {
-    message: 'Authentication failed: Invalid credentials.',
+    message: 'AUTH_GATE: Credentials validation failed.',
   })
   password: string;
 }

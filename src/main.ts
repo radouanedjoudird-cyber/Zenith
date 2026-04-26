@@ -3,12 +3,13 @@
  * ZENITH SECURE KERNEL - ENTERPRISE BOOTSTRAP PROTOCOL
  * ============================================================================
  * @module Main
+ * @version 7.4.0
  * @description Orchestrates the ignition of the high-availability security engine.
- * * DESIGN RATIONALE (ENTERPRISE GRADE):
- * 1. PROXY_TRUST: Configured for upstream load balancers (Nginx/Cloudflare).
- * 2. CSP_HARDENING: Dynamic Content Security Policy based on environment.
- * 3. SWAGGER_ISOLATION: Zero-footprint documentation in production environments.
- * 4. ERROR_MASKING: Strips sensitive stack traces from public responses.
+ * * DESIGN RATIONALE:
+ * 1. PROXY_AWARENESS: Configured for upstream load balancers (Nginx/Cloudflare).
+ * 2. SECURITY_HARDENING: Implements Helmet, CSP, and strict CORS policies.
+ * 3. FAIL_FAST_VALIDATION: Enforces structural integrity of inbound payloads.
+ * 4. GRACEFUL_TERMINATION: Handles OS signals for zero-downtime deployments.
  * ============================================================================
  */
 
@@ -29,23 +30,22 @@ async function bootstrap(): Promise<void> {
   
   /**
    * INITIALIZATION:
-   * Bootstrapping with log buffering to ensure DI resolution telemetry is captured.
+   * Bootstrapping with log buffering to ensure initial DI telemetry is captured.
    */
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
-    // CORS is managed manually via enableCors for granular control
+    // Explicitly disabling internal CORS to manage it via granular configuration.
     cors: false, 
   });
 
-  // Attach high-performance Pino logger
+  // Inject high-performance logging engine
   app.useLogger(app.get(PinoLogger));
   const logger = new Logger('ZENITH_BOOTSTRAP');
   const port = process.env.PORT || 3000;
 
   /**
    * SECTION 1: PERIMETER SECURITY & OPTIMIZATION
-   * Helmet: Hardens the application by setting various HTTP headers.
-   * Trust Proxy: Essential for accurate IP tracking when behind Nginx/ALB.
+   * Hardening the application layer against common web vulnerabilities.
    */
   app.use(helmet({
     contentSecurityPolicy: isProduction ? {
@@ -54,32 +54,35 @@ async function bootstrap(): Promise<void> {
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https:"],
       },
-    } : false, // Disable CSP in dev to allow Swagger UI scripts
+    } : false, // Permissive in DEV for Swagger Explorer
     crossOriginEmbedderPolicy: isProduction,
   }));
 
+  // Gzip/Brotli compression for payload optimization
   app.use(compression());
 
-  // Granular CORS Policy
+  // ENHANCED CORS POLICY: Zero-trust orientation
   app.enableCors({
     origin: isProduction 
       ? (process.env.ALLOWED_ORIGINS?.split(',') || []) 
-      : true, // Allow all in development for convenience
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'],
+      : true, 
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
-    exposedHeaders: ['Authorization', 'X-Trace-ID'],
+    exposedHeaders: ['Authorization', 'X-Response-Time', 'X-Trace-ID'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   });
 
   /**
-   * SECTION 2: ADVANCED ROUTING & VERSIONING
-   * Excluding health and metrics from global prefix for infrastructure compatibility.
+   * SECTION 2: GLOBAL ROUTING & VERSIONING
+   * Implementing URI versioning for API lifecycle stability.
    */
   app.setGlobalPrefix('api', {
     exclude: [
       { path: '/', method: RequestMethod.GET },
-      { path: 'metrics', method: RequestMethod.GET },
       { path: 'health', method: RequestMethod.GET },
+      { path: 'metrics', method: RequestMethod.GET },
     ],
   });
 
@@ -89,55 +92,55 @@ async function bootstrap(): Promise<void> {
   });
 
   /**
-   * SECTION 3: GLOBAL PIPELINES & ERROR HANDLING
-   * ValidationPipe: Enforcing strict DTO schemas (Fail-Fast).
+   * SECTION 3: PIPELINE HYGIENE & ERROR ABSTRACTION
+   * Enforcing strict DTO validation and global error interception.
    */
   app.useGlobalFilters(new HttpExceptionFilter(), new SecurityBreachFilter());
   
   app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
+    whitelist: true,               // Strip non-decorated properties
+    forbidNonWhitelisted: true,    // Reject requests with unknown properties
+    transform: true,               // Auto-transform payloads to DTO instances
     transformOptions: { enableImplicitConversion: true },
-    // Strict error masking in production to prevent information leakage
-    disableErrorMessages: isProduction,
-    dismissDefaultMessages: isProduction,
+    disableErrorMessages: isProduction, // Shield internal structure in production
   }));
 
   /**
-   * SECTION 4: OPENAPI DOCUMENTATION (SWAGGER)
-   * Strictly disabled in production to prevent API surface discovery.
+   * SECTION 4: API EXPLORER (SWAGGER)
+   * Isolated documentation layer for development and staging only.
    */
   if (!isProduction) {
     const config = new DocumentBuilder()
-      .setTitle('Zenith Secure Engine | System Registry')
-      .setDescription('Enterprise IAM & Distributed Systems Kernel with P95/P99 Observability.')
+      .setTitle('Zenith Secure Engine')
+      .setDescription('Enterprise Identity & Distributed Systems Kernel.')
       .setVersion('7.4.0')
-      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'JWT-auth')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', in: 'header' },
+        'JWT-auth'
+      )
       .build();
     
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup('docs', app, document, { 
-      customSiteTitle: 'Zenith API Explorer',
-      swaggerOptions: { persistAuthorization: true } 
+      customSiteTitle: 'Zenith API Registry',
+      swaggerOptions: { persistAuthorization: true, filter: true } 
     });
     
-    logger.log(`📑 [DOCS] API Documentation available at: http://localhost:${port}/docs`);
+    logger.log(`📑 [DOCS] API Registry exposed at: http://localhost:${port}/docs`);
   }
 
   /**
-   * SECTION 5: ORCHESTRATION & SHUTDOWN
-   * Handles SIGTERM (K8s/Docker) for graceful connection draining.
+   * SECTION 5: LIFECYCLE & ORCHESTRATION
+   * Ensuring the system drains connections gracefully before termination.
    */
   app.enableShutdownHooks();
   
-  await app.listen(port, '0.0.0.0'); // Listen on all interfaces
+  await app.listen(port, '0.0.0.0'); 
   
   logger.log(`🚀 [KERNEL] Zenith Engine v7.4.0 active [Mode: ${process.env.NODE_ENV || 'development'}]`);
-  logger.log(`📊 [TELEMETRY] Scrape target active at: http://localhost:${port}/metrics`);
 }
 
 bootstrap().catch((err) => {
-  console.error('❌ CRITICAL: Kernel ignition failure', err);
+  console.error('🔴 [CRITICAL] Kernel ignition sequence failed:', err);
   process.exit(1);
 });
