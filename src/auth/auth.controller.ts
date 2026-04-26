@@ -30,12 +30,10 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
-  ApiProperty,
   ApiResponse,
   ApiTags
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { IsEmail, IsNotEmpty } from 'class-validator';
 import type { Request } from 'express';
 
 // ZENITH CORE IMPORTS
@@ -45,23 +43,19 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { AuditInterceptor } from '../common/interceptors/audit.interceptor';
 import { DeviceFingerprint, FingerprintEngine } from '../common/utils/fingerprint.util';
 import { AuthService } from './auth.service';
-import { SigninDto, SignupDto } from './dto';
-import { RtGuard } from './guards/rt.guard';
 
 /**
- * @class LocalRecoveryDto
- * @description Internal Data Transfer Object for secure identity recovery.
- * @property {string} email - Validated target identity address.
+ * IMPORTING UNIFIED IDENTITY DTOS
+ * Using the Zenith Modular DTO Pattern for ingress validation.
  */
-class LocalRecoveryDto {
-  @ApiProperty({ 
-    description: 'The registered email for account restoration', 
-    example: 'contact@zenith-systems.dz' 
-  })
-  @IsEmail({}, { message: 'SECURITY_ERROR: Invalid email sequence' })
-  @IsNotEmpty({ message: 'SECURITY_ERROR: Email context is required' })
-  email: string;
-}
+import {
+  RequestRecoveryDto,
+  ResetPasswordDto,
+  SigninDto,
+  SignupDto
+} from './dto';
+
+import { RtGuard } from './guards/rt.guard';
 
 @ApiTags('Identity & Access Management')
 @Controller('auth')
@@ -79,9 +73,6 @@ export class AuthController {
    * @route POST /api/v1/auth/signup
    * @operation IDENTITY_PROVISIONING
    * @description Initiates a new identity registry and binds initial hardware context.
-   * @param {SignupDto} signupDto - Identity provisioning payload.
-   * @param {Request} req - Ingress request for telemetry extraction.
-   * @returns {Promise<any>} Response object containing identity metadata.
    */
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -100,9 +91,6 @@ export class AuthController {
    * @route POST /api/v1/auth/signin
    * @operation SECURE_INGRESS
    * @description Validates credentials and generates a device-anchored session context.
-   * @param {SigninDto} signinDto - Authentication credentials.
-   * @param {Request} req - Ingress request for hardware anchoring.
-   * @returns {Promise<any>} JWT Pair (Access & Refresh tokens).
    */
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -119,10 +107,8 @@ export class AuthController {
 
   /**
    * @route POST /api/v1/auth/recovery/request
-   * @operation IDENTITY_RECOVERY
+   * @operation RECOVERY_SIGNALING
    * @description Triggers the secure account recovery protocol with anti-enumeration logic.
-   * @param {LocalRecoveryDto} recoveryDto - Validated recovery payload.
-   * @returns {Promise<any>} Status of the recovery initiation.
    */
   @Public()
   @Throttle({ default: { limit: 3, ttl: 3600000 } })
@@ -130,17 +116,32 @@ export class AuthController {
   @ApiOperation({ summary: 'Initiate Secure Identity Recovery' })
   @ApiResponse({ status: 200, description: 'Recovery protocol successfully initiated.' })
   @HttpCode(HttpStatus.OK)
-  async requestRecovery(@Body() recoveryDto: LocalRecoveryDto): Promise<any> {
-    this.logger.warn(`🛡️ [RECOVERY] Identity recovery protocol requested for: ${recoveryDto.email}`);
+  async requestRecovery(@Body() recoveryDto: RequestRecoveryDto): Promise<any> {
+    this.logger.warn(`🛡️ [RECOVERY_INIT] RTR signaling for: ${recoveryDto.email}`);
     return await this.authService.requestPasswordReset(recoveryDto.email);
+  }
+
+  /**
+   * @route POST /api/v1/auth/recovery/reset
+   * @operation CREDENTIAL_ROTATION
+   * @description Finalizes the recovery lifecycle by committing new credentials via token validation.
+   * @param {ResetPasswordDto} resetDto - Cryptographic token and new entropy.
+   */
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 3600000 } })
+  @Post('recovery/reset')
+  @ApiOperation({ summary: 'Finalize Identity Recovery (Password Reset)' })
+  @ApiResponse({ status: 200, description: 'Credentials successfully rotated.' })
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(@Body() resetDto: ResetPasswordDto): Promise<any> {
+    this.logger.log(`🛠️ [RECOVERY_COMMIT] Attempting credential rotation via cryptographic token.`);
+    return await this.authService.resetPassword(resetDto);
   }
 
   /**
    * @route POST /api/v1/auth/refresh
    * @operation CRYPTOGRAPHIC_ROTATION
    * @description Executes RTR (Refresh Token Rotation) with forensic integrity checks.
-   * @param {Request} req - Ingress request containing the rotation token.
-   * @returns {Promise<any>} Renewed cryptographic materials.
    */
   @Public()
   @UseGuards(RtGuard)
@@ -161,9 +162,6 @@ export class AuthController {
   /**
    * @route POST /api/v1/auth/signout
    * @operation SESSION_REVOCATION
-   * @description Revokes a specific hardware-bound session context.
-   * @param {Request} req - Ingress request for revocation.
-   * @returns {Promise<any>} Acknowledgment of context decoupling.
    */
   @Public()
   @UseGuards(RtGuard)
@@ -183,9 +181,6 @@ export class AuthController {
   /**
    * @route GET /api/v1/auth/status
    * @operation TELEMETRY_EXPOSURE
-   * @description Returns real-time identity status and dynamic RBAC claims.
-   * @param {Request} req - Authenticated ingress request.
-   * @returns {Object} Comprehensive identity telemetry.
    */
   @UseGuards(PermissionsGuard)
   @Permissions('AUTH_STATUS_VIEW')

@@ -3,38 +3,57 @@
  * ZENITH SECURE KERNEL - INFRASTRUCTURE & RELIABILITY MODULE
  * ============================================================================
  * @module InfraController
+ * @version 7.4.0
+ * @author Zenith Systems Engine
  * @description Mission-critical telemetry, diagnostics, and system probes.
- * * ARCHITECTURAL COMPLIANCE:
- * 1. RBAC_ENFORCEMENT: Stress-testing vectors are gated via Role-Based Access Control.
- * 2. CLOUD_NATIVE_READY: Implements Liveness/Readiness patterns for K8s/Docker.
- * 3. SATURATION_LIMITER: Hard-capped execution cycles to prevent resource exhaustion.
+ * * DESIGN PATTERNS:
+ * 1. PROBE_PATTERN: Implements standard Liveness/Readiness for Orchestrators.
+ * 2. RBAC_HIERARCHY: Integrated with Zenith's Global Security Shield.
+ * 3. LOAD_SIMULATION: Deterministic CPU saturation for scaling benchmarks.
+ * * SECURITY COMPLIANCE:
+ * - NIST SP 800-53: Infrastructure monitoring and logging.
+ * - OWASP ASVS: Access control and resource exhaustion prevention.
  * ============================================================================
  */
 
 import {
   Controller,
   Get,
+  HttpStatus,
   Logger,
   Query,
   UseGuards,
   UseInterceptors
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { HealthCheck, HealthCheckService, PrismaHealthIndicator } from '@nestjs/terminus';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags
+} from '@nestjs/swagger';
+import {
+  HealthCheck,
+  HealthCheckService,
+  PrismaHealthIndicator
+} from '@nestjs/terminus';
 
-/* --- SECURITY SCHEMAS (Corrected Paths Based on Project Tree) --- */
-import { AtGuard } from '../auth/guards/at.guard'; // Corrected: Using AtGuard instead of JwtAuthGuard
+/* --- CORE SECURITY INTERFACE --- */
+import { AtGuard } from '../auth/guards/at.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
-import { RolesGuard } from '../common/guards/roles.guard'; // Corrected: RolesGuard is in common/guards
+import { RolesGuard } from '../common/guards/roles.guard';
 
-/* --- INSTRUMENTATION & SERVICES --- */
+/* --- PERFORMANCE & PERSISTENCE --- */
 import { MonitoringInterceptor } from '../common/interceptors/monitoring.interceptor';
 import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('Infrastructure & Reliability')
-@Controller('infra')
+@Controller({
+  path: 'infra',
+  version: '1',
+})
 @UseInterceptors(MonitoringInterceptor)
 export class InfraController {
   private readonly logger = new Logger('ZENITH_INFRA_ENGINE');
@@ -46,20 +65,21 @@ export class InfraController {
   ) {}
 
   /**
-   * @endpoint GET /api/v1/infra/health
-   * @access Public (Whitelisted for Orchestrator Probes)
-   * @description Standardized health check for Kubernetes liveness/readiness probes.
+   * @operation [HEALTH_PROBE]
+   * @description Standardized health check for Kubernetes/Docker orchestrators.
+   * @access PUBLIC_ACCESS (Whitelisted for system probes)
    */
   @Public()
   @Get('health')
   @HealthCheck()
   @ApiOperation({ 
     summary: 'System Liveness Probe',
-    description: 'Critical check for database persistence and kernel stability.' 
+    description: 'Validates persistence layer availability and kernel integrity.' 
   })
-  @ApiResponse({ status: 200, description: 'Core services operational.' })
-  @ApiResponse({ status: 503, description: 'Service degradation detected.' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Core services operational.' })
+  @ApiResponse({ status: HttpStatus.SERVICE_UNAVAILABLE, description: 'Kernel degradation detected.' })
   async check() {
+    this.logger.log('Executing System Liveness Probe...');
     return this.health.check([
       /**
        * PERSISTENCE_LAYER_VALIDATION:
@@ -70,41 +90,50 @@ export class InfraController {
   }
 
   /**
-   * @endpoint GET /api/v1/infra/stress
-   * @access Restricted (Admin Only)
-   * @description Generates controlled CPU saturation for autoscaling verification.
+   * @operation [STRESS_SIMULATION]
+   * @description Synthetic workload generation for autoscaling and P99 benchmarking.
+   * @access RESTRICTED (Elevated Privileges Required)
+   * @security JWT_BEARER_TOKEN | ROLE_ADMIN | ROLE_SUPERADMIN
    */
   @Get('stress')
-  @UseGuards(AtGuard, RolesGuard) // Changed to AtGuard as per your project structure
-  @Roles(Role.ADMIN)
+  @UseGuards(AtGuard, RolesGuard)
+  /**
+   * BEST_PRACTICE: Explicitly allow both ADMIN and SUPERADMIN.
+   * Note: The RolesGuard must be implemented to allow SUPERADMIN bypass.
+   */
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ 
     summary: 'Resource Saturation Simulation',
     description: 'Authorized stress testing for benchmarking P99 latency and scaling triggers.' 
   })
-  @ApiQuery({ name: 'cycles', type: Number, required: false, example: 100000000 })
-  @ApiResponse({ status: 200, description: 'Workload execution successful.' })
-  @ApiResponse({ status: 403, description: 'Privileged access required.' })
+  @ApiQuery({ 
+    name: 'cycles', 
+    type: Number, 
+    required: false, 
+    example: 100000000,
+    description: 'Number of floating-point operations to perform (Max: 500M).' 
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Workload execution successful.' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Insufficient administrative clearance.' })
   async simulateLoad(@Query('cycles') cycles: any = 100000000) {
     
-    /**
-     * DEFENSIVE_PROGRAMMING:
-     * Enforce a hard cap (MAX_CYCLES) to prevent unintentional self-inflicted DoS.
-     */
+    // DEFENSIVE_LOGIC: Sanitize and enforce hard-caps on CPU utilization
     const parsedCycles = isNaN(Number(cycles)) ? 100000000 : Number(cycles);
     const MAX_CYCLES = 500000000;
     const targetCycles = Math.min(parsedCycles, MAX_CYCLES);
 
-    if (process.env.NODE_ENV === 'production') {
-      this.logger.warn(`[AUDIT_LOG] Stress execution triggered by Admin in PRODUCTION environment.`);
+    // AUDIT_LOG: Track privileged operations in non-development environments
+    if (process.env.NODE_ENV !== 'development') {
+      this.logger.warn(`[AUDIT_LOG] Stress execution triggered: ${targetCycles} cycles in ${process.env.NODE_ENV} mode.`);
     }
 
     const start = Date.now();
     
     /**
      * COMPUTE_INTENSIVE_WORKLOAD:
-     * Synthetic iterations designed to increase CPU utilization, 
-     * reflected in Prometheus through the MonitoringInterceptor.
+     * Synthetic iterations designed to increase CPU utilization.
+     * Monitored via Prometheus Scrape Points.
      */
     let result = 0;
     for (let i = 0; i < targetCycles; i++) {
@@ -124,7 +153,8 @@ export class InfraController {
       },
       telemetry: {
         dispatched: true,
-        registry: 'Prometheus-Default'
+        registry: 'Prometheus-Default',
+        securityLevel: 'ELEVATED'
       }
     };
   }

@@ -11,142 +11,167 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto';
 
 /**
- * ZENITH IDENTITY SERVICE - CORE KERNEL v5.0 (Security Hardened)
- * -----------------------------------------------------------
+ * ============================================================================
+ * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) CORE KERNEL
+ * ============================================================================
  * @class UsersService
- * @description Enterprise-grade user lifecycle management for Zenith.
- * Implements high-integrity identity synchronization and secure attribute projection.
- * * * SECURITY ARCHITECTURE:
- * 1. CRYPTOGRAPHY: Argon2id hashing for zero-knowledge credential persistence.
- * 2. DATA SHIELDING: Surgical 'safeProfile' projection to mitigate PII leakage.
- * 3. AUDIT LOGGING: Real-time telemetry for identity mutations and lifecycle events.
- * * @author Radouane Djoudi
- * @project Zenith Secure Engine
+ * @module IdentityModule
+ * @description Centralized identity lifecycle engine for the Zenith ecosystem.
+ * Implements high-availability data access patterns, secure attribute projection,
+ * and cryptographic integrity for user metadata.
+ *
+ * SECURITY PROTOCOLS:
+ * - Attribute Isolation: Using 'IdentityProjection' to prevent PII leakage.
+ * - Credential Hardening: Argon2id salt-based hashing for secure rotation.
+ * - Error Sanitization: Obfuscating database internals via Prisma error mapping.
+ *
+ * @author Radouane Djoudi
+ * @version 7.4.0 (Distributed Systems Optimized)
+ * ============================================================================
  */
 @Injectable()
 export class UsersService {
-  private readonly logger = new Logger('ZENITH_IDENTITY_ENGINE');
-  
+  private readonly logger = new Logger('ZENITH_IAM_ENGINE');
+
   /**
-   * IDENTITY PROJECTION MATRIX: 
-   * Strict whitelist of non-sensitive attributes for API responses.
+   * IDENTITY PROJECTION MATRIX
+   * Defines a strict whitelist for data exposure across the API layer.
    */
-  private readonly safeProfile = { 
-    id: true, 
-    email: true, 
-    firstName: true, 
-    familyName: true, 
-    role: true, 
-    phoneNumber: true, 
+  private readonly identityProjection: Prisma.userSelect = {
+    id: true,
+    email: true,
+    firstName: true,
+    familyName: true,
+    role: true,
+    phoneNumber: true,
+    status: true,
+    version: true,
     createdAt: true,
     permissions: {
-      select: { action: true }
-    }
-  } as const;
+      select: { action: true },
+    },
+  };
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * @method getMe
+   * @description Retrieves the authenticated identity context from the registry.
+   * @param {string} userId - Target identity UUID.
+   * @returns {Promise<Partial<User>>} Sanitized identity profile.
    */
   async getMe(userId: string) {
+    if (!userId) {
+      this.logger.error('CRITICAL_GATE: Attempted lookup with null identity pointer.');
+      throw new InternalServerErrorException('ZENITH_CORE: Identity pointer corrupted.');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: this.safeProfile,
+      select: this.identityProjection,
     });
 
     if (!user) {
-      this.logger.error(`AUDIT_FAILURE [IDENTITY_MISSING]: Profile lookup failed for ${userId}`);
-      throw new NotFoundException('ZENITH_IAM: Identity context not found.');
+      this.logger.warn(`AUDIT_FAILURE [LOOKUP]: Identity ${userId} not present in registry.`);
+      throw new NotFoundException('ZENITH_IAM: Profile context missing.');
     }
+
     return user;
   }
 
   /**
    * @method updateMe
-   * @description Performs partial identity synchronization with credential rotation.
+   * @description Orchestrates partial identity synchronization and credential rotation.
+   * @param {string} userId - Target identity UUID.
+   * @param {UpdateUserDto} dto - Payload containing modified attributes.
    */
   async updateMe(userId: string, dto: UpdateUserDto) {
     try {
-      const { password, ...otherData } = dto;
+      const { password, ...payload } = dto;
       
-      /**
-       * 🟢 FIX: Changed Prisma.UserUpdateInput to Prisma.userUpdateInput (lowercase 'u')
-       * to align with the generated Prisma client types.
-       */
-      const dataToUpdate: Prisma.userUpdateInput = { ...otherData };
+      // Strict Type Casting for Prisma Kernel
+      const mutationData: Prisma.userUpdateInput = { ...payload };
 
       if (password) {
-        dataToUpdate.password = await argon2.hash(password);
-        this.logger.warn(`SECURITY_EVENT [CREDENTIAL_ROTATION]: Password hash upgraded for ${userId}`);
+        mutationData.password = await argon2.hash(password);
+        // Incrementing version for cryptographic session invalidation
+        mutationData.version = { increment: 1 };
+        this.logger.warn(`SECURITY_EVENT [ROTATION]: Credential upgrade triggered for ${userId}`);
       }
 
-      const updatedUser = await this.prisma.user.update({
+      const updatedIdentity = await this.prisma.user.update({
         where: { id: userId },
-        data: dataToUpdate,
-        select: this.safeProfile,
+        data: mutationData,
+        select: this.identityProjection,
       });
 
-      this.logger.log(`AUDIT_SUCCESS [IDENTITY_SYNC]: Profile synchronized for ${userId}`);
-      return updatedUser;
+      this.logger.log(`AUDIT_SUCCESS [SYNC]: Identity ${userId} successfully synchronized.`);
+      return updatedIdentity;
 
     } catch (error) {
-      this.handlePrismaError(error, userId);
+      this.handleKernelException(error, userId);
     }
   }
 
   /**
    * @method deleteMe
+   * @description Executes a high-integrity purge of the target identity from the system.
    */
   async deleteMe(userId: string) {
     try {
       await this.prisma.user.delete({ where: { id: userId } });
-      this.logger.warn(`SECURITY_ALERT [IDENTITY_PURGE]: Hard-delete executed for identity ${userId}`);
+      this.logger.warn(`AUDIT_ALERT [PURGE]: Identity ${userId} permanently decommissioned.`);
       
-      return { 
-        status: 'OK', 
-        message: 'Identity successfully purged from Zenith Registry.' 
+      return {
+        status: 'TERMINATED',
+        timestamp: new Date().toISOString(),
+        message: 'Identity successfully purged from Zenith Core Registry.',
       };
     } catch (error) {
-      this.logger.error(`AUDIT_ERROR [PURGE_FAILURE]: Target identity ${userId} not found.`);
-      throw new NotFoundException('ZENITH_IAM: Termination target not found.');
+      this.logger.error(`FAULT [PURGE_FAILURE]: Decommissioning failed for ${userId}.`);
+      throw new NotFoundException('ZENITH_IAM: Identity target not found for termination.');
     }
   }
 
   /**
-   * @method getAllUsers
+   * @method getAllUsers (Admin Scope)
+   * @description Returns a high-level telemetry list of all registered identities.
    */
   async getAllUsers() {
-    this.logger.debug('AUDIT_LOG [GOVERNANCE]: Querying global identity registry.');
-    return this.prisma.user.findMany({ 
-      select: this.safeProfile,
-      orderBy: { createdAt: 'desc' }
+    this.logger.debug('GOVERNANCE_QUERY: Accessing global identity registry.');
+    return this.prisma.user.findMany({
+      select: this.identityProjection,
+      orderBy: { createdAt: 'desc' },
     });
   }
 
   /**
-   * @method getUserById
+   * @method getUserById (Elevated Scope)
    */
   async getUserById(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: this.safeProfile,
+      select: this.identityProjection,
     });
 
-    if (!user) throw new NotFoundException('ZENITH_IAM: Requested identity not found.');
+    if (!user) {
+      throw new NotFoundException(`ZENITH_IAM: Identity [${userId}] not found.`);
+    }
     return user;
   }
 
   /**
-   * @private @method handlePrismaError
+   * @private @method handleKernelException
+   * @description Maps Prisma low-level faults to standard HTTP exceptions.
    */
-  private handlePrismaError(error: any, userId: string) {
+  private handleKernelException(error: any, contextId: string) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') {
-        throw new ConflictException('ZENITH_IAM: Unique constraint violation (Email/Phone collision).');
+        throw new ConflictException('ZENITH_IAM: Conflict - Unique attribute collision detected.');
       }
     }
-    this.logger.error(`CRITICAL_FAULT [ENGINE_SYNC]: Operation failed for ${userId} | ${error.message}`);
+    
+    this.logger.error(`KERNEL_PANIC: Sync failure for ${contextId} | Trace: ${error.message}`);
     throw new InternalServerErrorException('ZENITH_KERNEL: Identity synchronization fault.');
   }
 }

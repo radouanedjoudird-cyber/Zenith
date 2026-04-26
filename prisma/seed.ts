@@ -3,35 +3,68 @@
  * ZENITH SYSTEMS - INFRASTRUCTURE PROVISIONING ENGINE
  * ============================================================================
  * @module @zenith/infra-seed
- * @version 7.4.0
+ * @version 7.4.2 (Production Ready)
  * @author Radouane Djoudi
  * @license Proprietary - Zenith Secure Systems
- * * @description 
- * Manages the idempotent deployment of the core RBAC (Role-Based Access Control) 
- * matrix and provisions the root authority identity. 
- * * ARCHITECTURAL DESIGN:
- * 1. ATOMIC_UPSERT: Ensures that repeated executions do not corrupt data integrity.
- * 2. ARGON2ID_COMPLIANCE: Utilizes NIST-recommended hashing for the root anchor.
- * 3. TELEMETRY_INITIALIZATION: Deploys the first forensic session for system audit.
+ * ----------------------------------------------------------------------------
+ * CORE ARCHITECTURE:
+ * 1. KERNEL_LEVEL_INDEXING: Low-level MongoDB sparse index orchestration.
+ * 2. IDEMPOTENT_RBAC: Atomic UPSERT for policy registry synchronization.
+ * 3. ZERO_TRUST_PROVISIONING: Root authority anchoring using Argon2id.
  * ============================================================================
  */
 
 import { AccountStatus, PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { MongoClient } from 'mongodb'; // Required for low-level index management
 
-/** @constant {PrismaClient} prisma - Orchestration layer for MongoDB persistence */
+/** @constant {PrismaClient} prisma - Orchestration layer for high-level DB ops */
 const prisma = new PrismaClient();
+
+/**
+ * @function provisionSparseIndexes
+ * @description Injects sparse uniqueness constraints directly into MongoDB.
+ * This compensates for Prisma's current limitations with MongoDB sparse indexes.
+ */
+async function provisionSparseIndexes(): Promise<void> {
+  console.log('📡 [ZENITH_KERNEL]: Initializing Low-Level Indexing Layer...');
+  const client = new MongoClient(process.env.DATABASE_URL!);
+  
+  try {
+    await client.connect();
+    const db = client.db();
+    
+    // Explicitly deploying the Sparse Index for recovery tokens
+    await db.collection('users').createIndex(
+      { resetPasswordToken: 1 },
+      { 
+        unique: true, 
+        sparse: true, 
+        name: "unique_reset_token_sparse" 
+      }
+    );
+    
+    console.log('✅ [ZENITH_KERNEL]: Sparse Identity Indexes verified and active.');
+  } catch (error) {
+    console.warn('⚠️ [ZENITH_KERNEL]: Index sync warning (likely already exists).');
+  } finally {
+    await client.close();
+  }
+}
 
 /**
  * @function main
  * @async
- * @description Entry point for the infrastructure seeding lifecycle.
- * @returns {Promise<void>}
+ * @description Entry point for the Zenith Infrastructure Seeding Lifecycle.
  */
 async function main(): Promise<void> {
-  console.log('🚀 [ZENITH_INFRA]: Initializing Dynamic Policy Deployment...');
+  console.log('🚀 [ZENITH_INFRA]: Starting Global Provisioning Sequence...');
 
-  // [1] RBAC MATRIX DEFINITION
+  // [STEP 0]: PROVISION SYSTEM INDEXES
+  // ---------------------------------------------------------------------------
+  await provisionSparseIndexes();
+
+  // [STEP 1]: RBAC MATRIX DEFINITION (IDEMPOTENT)
   // ---------------------------------------------------------------------------
   const rolesMetadata = [
     {
@@ -52,14 +85,10 @@ async function main(): Promise<void> {
   ];
 
   console.log('📡 [ZENITH_RBAC]: Synchronizing policy registry...');
-  
   for (const role of rolesMetadata) {
     await prisma.role.upsert({
       where: { name: role.name },
-      update: { 
-        permissions: role.permissions,
-        updatedAt: new Date()
-      },
+      update: { permissions: role.permissions, updatedAt: new Date() },
       create: {
         name: role.name,
         description: role.description,
@@ -68,10 +97,10 @@ async function main(): Promise<void> {
     });
   }
 
-  // [2] ROOT AUTHORITY PROVISIONING (The Zero-Trust Anchor)
+  // [STEP 2]: ROOT AUTHORITY PROVISIONING
   // ---------------------------------------------------------------------------
   const rootEmail = 'admin@zenith-systems.dz';
-  const rootPassword = 'Zenith@2026!Admin'; // Match agreed credentials
+  const rootPassword = 'Zenith@2026!Admin';
   
   const hashedPassword = await argon2.hash(rootPassword, {
     type: argon2.argon2id,
@@ -81,20 +110,14 @@ async function main(): Promise<void> {
   });
 
   const superAdminRole = await prisma.role.findUnique({ where: { name: 'SUPERADMIN' } });
-
   if (!superAdminRole) {
-    throw new Error('🔴 [SEED_ERROR]: Execution halted. SUPERADMIN role context not found.');
+    throw new Error('🔴 [SEED_ERROR]: SUPERADMIN role context not initialized.');
   }
 
   console.log(`🔑 [ZENITH_IAM]: Anchoring Root Authority: ${rootEmail}`);
-
   const rootUser = await prisma.user.upsert({
     where: { email: rootEmail },
-    update: {
-      password: hashedPassword,
-      roleId: superAdminRole.id,
-      status: AccountStatus.ACTIVE,
-    },
+    update: { password: hashedPassword, roleId: superAdminRole.id },
     create: {
       email: rootEmail,
       password: hashedPassword,
@@ -107,46 +130,36 @@ async function main(): Promise<void> {
     },
   });
 
-  // [3] FORENSIC SESSION TELEMETRY
+  // [STEP 3]: FORENSIC INITIALIZATION
   // ---------------------------------------------------------------------------
-  const rootSessionExpiry = new Date();
-  rootSessionExpiry.setFullYear(rootSessionExpiry.getFullYear() + 1); // 1-year persistence
-
-  /**
-   * Ensuring a clean forensic record for the initial deployment.
-   * This anchors the hardware-bound session for the first login attempt.
-   */
+  console.log('🛡️ [ZENITH_SESSION]: Stabilizing forensic telemetry anchor...');
   await prisma.session.deleteMany({ where: { userId: rootUser.id } });
-
-  const systemRtHash = await argon2.hash('BOOTSTRAP_INITIALIZATION_SECRET_2026');
   
+  const systemRtHash = await argon2.hash('BOOTSTRAP_INITIALIZATION_SECRET_2026');
   await prisma.session.create({
     data: {
       userId: rootUser.id,
       hashedRt: systemRtHash,
       deviceId: 'ZENITH-INFRA-ROOT-01',
       os: 'ZenithOS/Kernel',
-      browser: 'System-Seed-Engine',
       ipAddress: '127.0.0.1',
-      expiresAt: rootSessionExpiry,
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // +1 Year
     },
   });
 
-  console.log('🛡️ [ZENITH_SESSION]: Forensic session anchor deployed.');
-  console.log('✅ [ZENITH_SUCCESS]: Infrastructure provisioning complete.');
+  console.log('✅ [ZENITH_SUCCESS]: Infrastructure synchronization complete.');
 }
 
 /**
- * EXECUTION_HOOK
- * Handles lifecycle events and pool management.
+ * LIFECYCLE MANAGEMENT
  */
 main()
   .catch((e: Error) => {
-    console.error('🔴 [CRITICAL_BOOT_FAILURE]: Core Provisioning Aborted.');
+    console.error('🔴 [CRITICAL_BOOT_FAILURE]: Provisioning aborted.');
     console.error(`Reason: ${e.message}`);
     process.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
-    console.log('🔌 [ZENITH_INFRA]: Connectivity pool released.');
+    console.log('🔌 [ZENITH_INFRA]: Infrastructure connectivity pool released.');
   });
