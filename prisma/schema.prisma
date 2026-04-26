@@ -2,9 +2,9 @@
 // ZENITH PERSISTENCE LAYER - CORE SCHEMA v7.4.0
 // -----------------------------------------------------------------------------
 // @file: schema.prisma
-// @author: Radouane Djoudi
-// @engine: MongoDB with ReplicaSet Optimization
-// @standards: ISO/IEC 27001 | SOC2 Compliance | NIST CSF
+// @version: 7.4.2 (Production Ready - Optimized for MongoDB Sparse Indexes)
+// @description: Secure IAM & Forensic Telemetry Architecture.
+// @compliance: ISO/IEC 27001, SOC2, GDPR, NIST CSF
 // -----------------------------------------------------------------------------
 
 generator client {
@@ -18,7 +18,7 @@ datasource db {
 }
 
 // -----------------------------------------------------------------------------
-// [1] SYSTEM ENUMERATIONS
+// [1] SYSTEM ENUMERATIONS (Domain Constants)
 // -----------------------------------------------------------------------------
 
 enum AccountStatus {
@@ -49,43 +49,62 @@ enum Severity {
 // -----------------------------------------------------------------------------
 
 /// @model User
-/// Core identity entity with hardware-bound security telemetry.
+/// Core identity entity with hardware-bound security telemetry and versioning.
 model user {
-  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
   
-  /// Global unique identifier for identity
-  email           String        @unique
-  password        String        // Argon2id Hashed
-  firstName       String
-  familyName      String
-  phoneNumber     String        @unique
+  /// Global unique identifier for identity provisioning.
+  email         String        @unique
+  
+  /// @security Argon2id cryptographic hash.
+  password      String        
+  
+  firstName     String
+  familyName    String
+  
+  /// Contact telemetry - enforced uniqueness for SMS-based MFA.
+  phoneNumber   String        @unique
   
   /// SYSTEM_STATE_MANAGEMENT
-  status          AccountStatus @default(ACTIVE)
-  isTwoFactorEnabled Boolean    @default(false)
+  status        AccountStatus @default(ACTIVE)
+  
+  /// Multi-Factor Authentication (MFA) status indicator.
+  isTwoFactorEnabled Boolean  @default(false)
   
   /// DYNAMIC_RBAC_INTEGRATION
-  roleId          String?       @db.ObjectId
-  role            role?         @relation(fields: [roleId], references: [id])
+  roleId        String?       @db.ObjectId
+  role          role?         @relation(fields: [roleId], references: [id])
   
   /// IDENTITY_RECOVERY_PROTOCOL
-  resetPasswordToken   String?  
-  resetPasswordExpires DateTime? @db.Date
+  /// @security SHA-256 hashed recovery artifact.
+  /// NOTE: @unique removed to allow Native Sparse Index injection via seed.ts.
+  /// This prevents 409 Conflict on multiple NULL values.
+  resetPasswordToken   String?       
+  
+  /// @security Temporal boundary for recovery protocol (TTL).
+  resetPasswordExpires DateTime?     @db.Date
 
   /// CONCURRENCY_CONTROL
-  version         Int           @default(1)
+  /// Versioning for global session revocation on password rotation.
+  version       Int            @default(1)
 
-  createdAt       DateTime      @default(now()) @db.Date
-  updatedAt       DateTime      @updatedAt @db.Date
+  /// FORENSIC_TELEMETRY
+  lastLoginAt   DateTime?      @db.Date
+  createdAt     DateTime       @default(now()) @db.Date
+  updatedAt     DateTime       @updatedAt @db.Date
 
   // RELATION_HOOKS
-  permissions     userPermission[]
-  sessions        session[]
+  permissions   userPermission[]
+  sessions      session[]
 
   @@map("users")
   @@index([roleId])
   @@index([status])
-  @@index([resetPasswordToken])
+  @@index([email, status])
+  
+  // CRITICAL: The @@unique([resetPasswordToken]) was removed from here.
+  // We enforce uniqueness programmatically via MongoClient in seed.ts
+  // to ensure 'sparse: true' is respected at the MongoDB Kernel level.
 }
 
 /// @model Role
@@ -94,7 +113,6 @@ model role {
   name        String   @unique 
   description String?
   permissions String[] 
-  
   users       user[]
   createdAt   DateTime @default(now()) @db.Date
   updatedAt   DateTime @updatedAt @db.Date
@@ -103,24 +121,18 @@ model role {
 }
 
 /// @model Session
-/// Distributed session management with hardware fingerprinting.
 model session {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   userId    String   @db.ObjectId
   user      user     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   hashedRt  String   @unique
-
-  /// HARDWARE_TELEMETRY_ANCHORING
   deviceId  String?  
   os        String?  
   browser   String?  
   device    String?  
   cpuArch   String?  
-  
   ipAddress String?
   userAgent String?
-  
   expiresAt DateTime @db.Date
   createdAt DateTime @default(now()) @db.Date
   updatedAt DateTime @updatedAt @db.Date
@@ -132,33 +144,25 @@ model session {
 }
 
 // -----------------------------------------------------------------------------
-// [3] FORENSIC AUDIT TELEMETRY
+// [3] FORENSIC AUDIT TELEMETRY (Immutability Layer)
 // -----------------------------------------------------------------------------
 
-/// @model AuditLog
-/// Immutable record of all critical system mutations.
 model auditLog {
   id          String    @id @default(auto()) @map("_id") @db.ObjectId
-  action      String    // Format: DOMAIN.ACTION (e.g., USER.PASSWORD_CHANGE)
-  entity      String    // Target Domain Object
+  action      String    
+  entity      String    
   entityId    String?   @db.ObjectId
   userId      String?   @db.ObjectId
   userEmail   String?
-  
-  /// SECURITY_FORENSICS_CONTEXT
-  /// 🛡️ FIXED: Added missing hardware telemetry vectors
   deviceId    String?
-  os          String?   // 🛡️ Added to match AuditInterceptor
-  browser     String?   // 🛡️ Added to match AuditInterceptor
+  os          String?   
+  browser     String?   
   ipAddress   String?
   userAgent   String?
-
   method      String?
   path        String?
-  
   payload     Json?     
   newData     Json?     
-  
   status      LogStatus @default(SUCCESS)
   severity    Severity  @default(LOW)
   createdAt   DateTime  @default(now()) @db.Date

@@ -1,90 +1,102 @@
 /**
  * ============================================================================
- * ZENITH IDENTITY INFRASTRUCTURE - REFRESH CONTEXT STRATEGY
+ * ZENITH IDENTITY HYDRATION ENGINE - RT STRATEGY
  * ============================================================================
  * @module RtStrategy
  * @version 7.4.0
- * @description High-integrity validation layer for multi-device session persistence.
+ * @author Radouane Djoudi
+ * @description Orchestrates secure token rotation with hybrid stateful validation.
  * * ARCHITECTURAL RATIONALE:
- * 1. DUAL_LAYER_VERIFICATION: Bridges stateless claims with stateful DB checks.
- * 2. RTR_ENGINE: Injects raw token artifacts for 'Burn-on-Use' rotation logic.
- * 3. HARDWARE_AFFINITY: Provides context for device-bound session integrity.
+ * 1. ROTATION_SECURITY: Extracts raw RT for cryptographic cross-verification (Argon2).
+ * 2. VERSION_SYNCHRONIZATION: Ensures global session revocation via identity versioning.
+ * 3. NULL_SAFETY: Implements defensive checks for header extraction to prevent runtime crashes.
  * ============================================================================
  */
 
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class RtStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
   private readonly logger = new Logger('ZENITH_RT_STRATEGY');
 
-  constructor(private readonly config: ConfigService) {
-    const refreshSecret = config.get<string>('RT_SECRET');
+  constructor(
+    private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
+    const rtSecret = config.get<string>('RT_SECRET');
 
-    /**
-     * KERNEL_INTEGRITY_CHECK:
-     * Prevents service instantiation if the cryptographic registry is incomplete.
-     * Essential for maintaining the chain of trust.
-     */
-    if (!refreshSecret) {
-      throw new Error('🛡️ ZENITH_CORE_ERROR: RT_SECRET is missing in environment registry.');
+    if (!rtSecret) {
+      throw new Error('🛡️ ZENITH_CORE_ERROR: RT_SECRET configuration is missing.');
     }
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false, // Strict temporal enforcement
-      secretOrKey: refreshSecret,
-      /**
-       * @property passReqToCallback
-       * @description Crucial for 'Reuse Detection'. Enables extraction of the raw 
-       * JWT string for Argon2id comparison against the persistent Session Registry.
-       */
-      passReqToCallback: true,
+      ignoreExpiration: false,
+      secretOrKey: rtSecret,
+      passReqToCallback: true, // Enables raw request access for token extraction
     });
   }
 
   /**
    * @method validate
-   * @description Hydrates the execution context with decoded identity and raw RT artifacts.
-   * @param req - Inbound HTTP execution context for header extraction.
-   * @param payload - Decoded high-entropy claims (sub, email, role, perms).
+   * @async
+   * @description Validates Refresh Token integrity, account status, and credential version.
+   * @param {Request} req - The incoming execution context.
+   * @param {any} payload - Decoded JWT claims including 'sub' and 'version'.
+   * @returns {Promise<Object>} Refined identity context with raw refresh token.
+   * @throws {UnauthorizedException} If security checks fail.
    */
   async validate(req: Request, payload: any) {
     /**
-     * @protocol ATOMIC_TOKEN_EXTRACTION:
-     * Captures the raw encoded JWT string directly from the Authorization header.
-     * This serves as the 'Pre-image' required for the stateful database verify operation.
+     * 1. INTEGRITY_GUARD:
+     * Validates that the token contains the mandatory security version claim.
      */
-    const authHeader = req?.get('authorization');
-    const refreshToken = authHeader?.replace(/Bearer/i, '').trim();
-
-    /**
-     * SECURITY_GATE_TRIGGER:
-     * Rejects requests where the token extraction fails despite a valid signature.
-     * Protects against header corruption or injection attempts.
-     */
-    if (!refreshToken) {
-      this.logger.error(`SECURITY_EVENT [RT_EXTRACTION_FAILURE]: Subject ID: ${payload.sub}`);
-      throw new ForbiddenException('ZENITH_SHIELD: Refresh context integrity compromised.');
+    if (!payload.sub || payload.version === undefined) {
+      throw new UnauthorizedException('ZENITH_SHIELD: Refresh context integrity failure.');
     }
 
     /**
-     * IDENTITY_HYDRATION_LOGIC:
-     * Normalizes the identity context for the v7.4.0 Refresh Token Rotation (RTR).
-     * Synchronizes claim names with AtStrategy for global consistency.
+     * 2. ACTIVE_VERSION_SYNC:
+     * High-security check to invalidate tokens after password resets or global sign-outs.
+     */
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { version: true, status: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('ZENITH_GUARD: Identity context revoked.');
+    }
+
+    if (user.version !== payload.version) {
+      this.logger.warn(`🚨 [SECURITY_REVOCATION]: Version mismatch for ID: ${payload.sub}. Access denied.`);
+      throw new UnauthorizedException('ZENITH_GUARD: Session invalidated due to security update.');
+    }
+
+    /**
+     * 3. DEFENSIVE_TOKEN_EXTRACTION:
+     * Resolves TS2532 by explicitly validating the authorization header existence.
+     */
+    const authHeader = req.get('authorization');
+    if (!authHeader) {
+      this.logger.error(`❌ [PROTOCOL_VIOLATION]: Refresh attempt without Authorization header.`);
+      throw new UnauthorizedException('ZENITH_SHIELD: Authorization header is required.');
+    }
+
+    const refreshToken = authHeader.replace('Bearer', '').trim();
+
+    /**
+     * 4. IDENTITY_HYDRATION:
+     * Returns the payload augmented with the raw token for downstream RTR logic.
      */
     return {
-      id: payload.sub,            // Primary identity reference
-      sub: payload.sub,           // Standard JWT subject claim
-      email: payload.email,
-      role: payload.role,         // Dynamic role name (e.g., "MANAGER")
-      perms: payload.perms,       // Modern PBAC claims mapping
-      permissions: payload.perms, // Legacy mapping for backward compatibility
-      refreshToken,               // Raw artifact for stateful verification
+      ...payload,
+      refreshToken,
     };
   }
 }

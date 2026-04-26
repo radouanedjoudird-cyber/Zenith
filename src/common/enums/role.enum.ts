@@ -1,40 +1,58 @@
 /**
  * ============================================================================
- * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) - STATIC ROLE CONSTANTS
+ * ZENITH IDENTITY & ACCESS MANAGEMENT (IAM) - CORE ROLE REGISTRY
  * ============================================================================
- * @module RoleConstants
+ * @module Role
  * @version 7.4.0
- * @description Defines the core system roles for bootstrap and internal logic.
- * * * ARCHITECTURAL NOTE:
- * Since v7.4.0, Zenith uses Dynamic RBAC (stored in MongoDB). This file 
- * serves as a static reference for hardcoded system logic and seeding.
+ * @author Zenith Systems Engine
+ * @description Centralized Authority for system-wide role definitions.
+ * * * ARCHITECTURAL COMPLIANCE:
+ * 1. IMMUTABILITY: Enforced via TypeScript 'as const' and Enum patterns.
+ * 2. SINGLE_SOURCE_OF_TRUTH: Synchronized with the 'Role' collection in the Data Registry.
+ * 3. HIERARCHICAL_MAPPING: Designed for privilege escalation and bypass logic.
  * ============================================================================
  */
 
 /**
- * @constant Role
- * @description Immutable reference for primary system identities.
- * These must exist in the 'role' collection in MongoDB for system integrity.
+ * @enum Role
+ * @description Defines the cryptographic string representations of system identities.
+ * These values are bound to JWT 'role' claims and database persistence layers.
  */
-export const Role = {
-  /** Standard consumer identity with baseline privileges */
-  USER: 'USER',
+export enum Role {
+  /**
+   * @identity CONSUMER
+   * Standard consumer identity with baseline self-service privileges.
+   */
+  USER = 'USER',
 
-  /** Full administrative control over the IAM kernel */
-  ADMIN: 'ADMIN',
+  /**
+   * @identity SYSTEM_ADMIN
+   * Administrative control over business logic, user management, and IAM kernel.
+   */
+  ADMIN = 'ADMIN',
 
-  /** Identity focused on content governance and moderation */
-  MODERATOR: 'MODERATOR',
+  /**
+   * @identity CONTENT_MODERATOR
+   * Specialized identity for content governance, safety enforcement, and moderation.
+   */
+  MODERATOR = 'MODERATOR',
 
-  /** Specialized identity for security auditing and forensic review */
-  AUDITOR: 'AUDITOR',
+  /**
+   * @identity SECURITY_AUDITOR
+   * Read-only elevated access for forensic review, compliance auditing, and logging.
+   */
+  AUDITOR = 'AUDITOR',
 
-  /** Elevated administrative identity for infrastructure-level operations */
-  SUPER_ADMIN: 'SUPER_ADMIN',
-} as const;
+  /**
+   * @identity INFRASTRUCTURE_SUPER_ADMIN
+   * Highest-level identity with absolute authority over kernel and infrastructure.
+   * [WARNING] This role triggers 'Privilege Bypass' in security guards.
+   */
+  SUPER_ADMIN = 'SUPER_ADMIN',
+}
 
 /**
- * @type Role
- * @description Type-safe extraction of Role values for TypeScript compiler safety.
+ * @type RoleType
+ * @description Derived type for high-level identity manipulation.
  */
-export type Role = (typeof Role)[keyof typeof Role];
+export type RoleType = keyof typeof Role;
